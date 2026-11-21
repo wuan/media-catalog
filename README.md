@@ -1,93 +1,347 @@
 # media-catalog
 
+Generate a fast, deployable static catalog for a photo/video archive laid out as
+`YYYY/MM`. The generator scans the archive read-only, extracts safe metadata,
+produces one WebP thumbnail per item, renders browsable HTML, and emits sharded
+JSON for client-side search. Build state lives in SQLite so reruns only process
+new or changed items.
 
+The archive and the web tree are served by the same web server:
 
-## Getting started
+- `/` → generated `public/` tree
+- `/media/` → read-only NAS mount (the originals)
+- `/thumbs/` → generated thumbnails inside `public/`
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Requirements
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Rust (edition 2021 toolchain)
+- `ffmpeg` and `ffprobe` on `PATH` for video probing and poster extraction.
+  The build fails before scanning with a clear message when either is missing.
+- The media root must already exist. Originals are never modified or copied.
 
-## Add your files
+## Build and test
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```sh
+cargo build --release
+cargo test
+cargo fmt --check
+cargo clippy -- -D warnings
 ```
-cd existing_repo
-git remote add origin https://git.tryb.de/family/media-catalog.git
-git branch -M main
-git push -uf origin main
+
+The release binary is `target/release/media-catalog`. `--help` lists every flag.
+Performance measurements for a real-archive subset and a synthetic 75k-item tree
+are recorded in [`docs/performance.md`](docs/performance.md).
+
+## Quick start
+
+Organize the originals by folder; the folder path is the authoritative grouping:
+
+```text
+media/
+  2023/12/IMG_0001.jpg
+  2024/05/event/clip.mp4
 ```
 
-## Integrate with your tools
+Run the generator:
 
-* [Set up project integrations](https://git.tryb.de/family/media-catalog/-/settings/integrations)
+```sh
+cargo run --release -- \
+  --media-root ./media \
+  --catalog-root ./catalog \
+  --jobs 4
+```
 
-## Collaborate with your team
+The catalog root owns the deployable tree and build metadata:
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```text
+catalog/
+  public/                deployable web tree
+  state.sqlite           build state
+  build.lock             concurrent-run guard
+```
 
-## Test and Deploy
+The first run creates `public/`, thumbnails, HTML, and JSON. Later runs process
+only new or changed files:
 
-Use the built-in continuous integration in GitLab.
+```sh
+cargo run --release -- --media-root ./media --catalog-root ./catalog --jobs 4
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Configuration
 
-***
+CLI flags override an optional TOML file. If `--config` is omitted, the
+generator reads `./media-catalog.toml` when that file exists.
 
-# Editing this README
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--media-root <path>` | required | Root of the read-only `YYYY/MM` archive. |
+| `--catalog-root <path>` | required | Root for `public/`, `state.sqlite`, and `build.lock`. |
+| `--media-url-prefix <path>` | `/media` | URL prefix for original media links. |
+| `--thumb-url-prefix <path>` | `/thumbs` | URL prefix for thumbnail links. |
+| `--jobs <n>` | `min(4, CPU cores)` | Parallel thumbnail/probe workers. |
+| `--force` | off | Regenerate thumbnails even for unchanged fingerprints. |
+| `--prune` | off | Delete thumbnails with no catalog item. |
+| `--dry-run` | off | Scan and report planned work; write nothing. |
+| `--quiet` | off | Suppress progress reporting on stderr. |
+| `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
+| `--config <path>` | `./media-catalog.toml` if present | TOML configuration file. |
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Example `media-catalog.toml`:
 
-## Suggestions for a good README
+```toml
+media_root = "/mnt/nas/media"
+catalog_root = "./catalog"
+media_url_prefix = "/media"
+thumb_url_prefix = "/thumbs"
+jobs = 4
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+URL prefixes are normalized to a leading slash and no trailing slash. The public
+root is always `<catalog-root>/public`, and build state lives directly in the
+catalog root, outside the deployable tree.
 
-## Name
-Choose a self-explaining name for your project.
+## Progress output
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Progress messages go to stderr, keeping the final run summary on stdout easy to
+capture. Each pipeline phase prints a start and finish line. Probing and
+thumbnail generation show a live bar on a terminal; when stderr is redirected to
+a file or cron log, they log a counter at roughly ten-percent intervals instead.
+Use `--quiet` to suppress all progress output.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+The state database and the `build.lock` file sit beside each other in the
+catalog root. The lock is held for the whole run; a second build exits with a
+clear message and writes nothing.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Supported formats
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Images:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+- `jpg`, `jpeg` (JPEG, including EXIF orientation and capture time)
+- `png`
+- `webp`
+- `heic`, `heif` are cataloged in v1 but reported as unsupported and shown with
+  a placeholder tile. The decoder boundary allows HEIC support later without
+  changing the state schema or renderer.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Videos (probed and poster-framed through ffmpeg/ffprobe):
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+- `mp4`, `mov`, `m4v`, `hevc`, `mkv`, `avi`, `webm`
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+Hidden files and directories, sidecars such as `.xmp`/`.aae`, unsupported
+extensions, and files outside `YYYY/MM` are skipped. HEIC/HEIF and videos are
+still cataloged when they cannot be decoded; individual failures never abort the
+whole build.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Metadata and privacy
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+For each item the catalog records only:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- width and height (upright)
+- capture timestamp (`YYYY-MM-DD HH:MM:SS`, naive local wall clock)
+- video duration in milliseconds
+- media kind, relative path, thumbnail availability
 
-## License
-For open source projects, say how it is licensed.
+JPEG capture time comes from EXIF `DateTimeOriginal`; when it is absent, the
+file modification time is used. Videos use ffprobe's `creation_time` when
+present and otherwise the modification time. EXIF timestamps carry no timezone,
+so they are stored as naive local strings for deterministic, unambiguous sorting.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+GPS coordinates, camera make/model, and other private EXIF fields are never
+extracted or serialized into HTML or JSON. Thumbnails are re-encoded from pixels
+and therefore carry no source metadata.
+
+## Thumbnails
+
+Every item gets one 512×512 WebP thumbnail at quality 80:
+
+- EXIF orientation (photos) and ffmpeg autorotation (videos) are applied first.
+- The center square is cropped and resized to 512×512 without distortion.
+- Files mirror the source path and append `.webp` instead of replacing the
+  extension:
+
+  ```text
+  original:  /media/2024/05/event/IMG_0001.jpg
+  thumbnail: /thumbs/2024/05/event/IMG_0001.jpg.webp?v=<version>
+  ```
+
+- The version is derived from the source size and modification time and changes
+  only when the source changes, giving stable URLs and cheap cache invalidation.
+- Writes use a temporary file in the destination directory followed by a rename,
+  so visitors never see partial thumbnails.
+- Video posters use a frame at `min(1 second, 10% of duration)`, falling back to
+  the first frame for very short or unseekable videos.
+- Failed thumbnails are recorded and retried on the next run even when the
+  fingerprint is unchanged. Unsupported formats keep a placeholder tile.
+
+`--force` regenerates every thumbnail regardless of fingerprints.
+
+## Generated web tree
+
+```text
+public/
+  index.html              root years page
+  YYYY/index.html         months for one year
+  YYYY/MM/index.html      item grid for one month
+  search.html             client-side search and filters
+  assets/site.css
+  assets/search.js
+  catalog/index.json
+  catalog/YYYY.json
+  thumbs/...
+```
+
+Month grids render every item with:
+
+- `loading="lazy"` and `decoding="async"` thumbnails
+- capture date and filename
+- a `Video · duration` marker for videos
+- a direct link to the original under `/media/`
+- a neutral placeholder when no thumbnail exists
+
+Pages render without JavaScript. All navigation is root-relative and all
+thumbnail/media URLs are root-relative and percent-encoded per path segment
+(spaces, Unicode, `#`, `%`). Askama escapes filenames and metadata, and every
+thumbnail has non-empty alternative text. No per-item HTML pages are emitted.
+
+## JSON catalog and search
+
+`catalog/index.json` lists years, counts, months, and shard paths:
+
+```json
+{
+  "schema_version": 1,
+  "total_items": 3,
+  "years": [
+    {
+      "year": 2024,
+      "count": 2,
+      "months": [{ "month": 5, "count": 2 }],
+      "shard": "catalog/2024.json"
+    }
+  ]
+}
+```
+
+Each `catalog/YYYY.json` shard contains ordered item records:
+
+```json
+{
+  "schema_version": 1,
+  "year": 2024,
+  "items": [
+    {
+      "path": "2024/05/a.jpg",
+      "month": 5,
+      "kind": "image",
+      "captured_at": "2024-05-01 10:11:12",
+      "width": 4032,
+      "height": 3024,
+      "duration_ms": null,
+      "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=...",
+      "media_url": "/media/2024/05/a.jpg",
+      "thumb_available": true
+    }
+  ]
+}
+```
+
+Search (`search.html` + `assets/search.js`) loads the index and all year shards
+in parallel, then filters by text, type (`image`/`video`), year, and month. Filters
+are reflected in the URL query (`q`, `kind`, `year`, `month`) for shareable links
+and restored on page load. Without JavaScript, the page explains the limitation
+and links to the browsable year hierarchy.
+
+HTML and JSON contain no build timestamps, so two runs over an unchanged archive
+produce byte-identical output.
+
+## Incremental builds, resume, and cleanup
+
+The fingerprint is `size:mtime` (nanosecond modification time), stored in SQLite
+with cached probe metadata and thumbnail status.
+
+On each run:
+
+1. Scan the media tree and diff fingerprints.
+2. Probe only new/changed items, plus unchanged rows missing cached metadata.
+3. Thumbnail only new/changed items, retries, missing files, and `--force` work.
+4. Regenerate all HTML and JSON from the current catalog.
+5. Remove state rows for deleted items (unless blocked by the mount guard).
+6. Optionally prune orphan thumbnails under `public/thumbs/`.
+
+Unchanged sources are not reopened for probing or thumbnailing. An interrupted
+build leaves completed thumbnails recorded and in place; rerunning resumes the
+unfinished work and retries failed items. Deleted items disappear from pages and
+JSON immediately.
+
+### Prune safety and mount drops
+
+Pruning is opt-in with `--prune` and is confined to `public/thumbs/`. It removes
+files that do not belong to any current catalog item and cleans up empty
+directories; no file outside the thumbnail tree is touched.
+
+To protect against a stale or missing NAS mount, a run warns when the current
+item count is less than half of the previous count (once the archive has at least
+four rows). In that case the build skips prune and state cleanup, still renders
+the current view, and exits nonzero. Confirm real deletions with
+`--allow-mount-drop` before pruning and state cleanup proceed.
+
+## Deployment
+
+### Web server (nginx)
+
+Serve the generated tree at `/` and the NAS originals read-only at `/media/`:
+
+```nginx
+server {
+    listen 80;
+    server_name media.example.lan;
+    root /srv/media-catalog/public;
+
+    location /media/ {
+        alias /mnt/nas/media/;
+        autoindex off;
+    }
+
+    location /thumbs/ {
+        # Thumbnail URLs carry ?v=<fingerprint>, so long-lived immutable caching is safe.
+        add_header Cache-Control "public, max-age=2592000, immutable";
+        try_files $uri =404;
+    }
+
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache";
+    }
+
+    location /catalog/ {
+        add_header Cache-Control "no-cache";
+    }
+}
+```
+
+HTML and JSON should revalidate; versioned thumbnails can be cached for a long
+time because a changed source changes the URL.
+
+### Snapshot or rsync deployment
+
+Keep the previous `public/` snapshot for rollback. Deploy changes with:
+
+```sh
+rsync -a --delete public/ media@web:/srv/media-catalog/public/
+```
+
+`--delete` removes stale pages, shards, and pruned thumbnails on the server.
+
+### Initial build
+
+The first complete build reads the entire archive and can take hours for a large
+NAS collection. Use a modest `--jobs` value (for example 4) to bound memory on
+large panoramas and avoid hammering the NAS. If the process is interrupted, rerun
+the same command; completed thumbnails are skipped. Later incremental runs
+process only new or changed files and are much faster.
+
+## Run summary and exit status
+
+The summary reports scanned counts, new/changed/unchanged items, probes,
+thumbnails generated/skipped/failed/unsupported, pages and JSON written, deleted
+rows, pruned files, per-item errors, and elapsed time. Exit status is nonzero for
+configuration errors, any per-item failure, or a blocked mount-drop guard.

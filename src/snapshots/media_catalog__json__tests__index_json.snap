@@ -1,0 +1,32 @@
+---
+source: src/json.rs
+expression: output.index
+---
+{
+  "schema_version": 1,
+  "total_items": 3,
+  "years": [
+    {
+      "year": 2024,
+      "count": 2,
+      "months": [
+        {
+          "month": 5,
+          "count": 2
+        }
+      ],
+      "shard": "catalog/2024.json"
+    },
+    {
+      "year": 2023,
+      "count": 1,
+      "months": [
+        {
+          "month": 12,
+          "count": 1
+        }
+      ],
+      "shard": "catalog/2023.json"
+    }
+  ]
+}

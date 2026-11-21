@@ -1,0 +1,5 @@
+/target/
+/public/
+/.media-catalog/
+/media/
+*.snap.new
