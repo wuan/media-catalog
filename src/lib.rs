@@ -11,6 +11,7 @@ pub mod prune;
 pub mod render;
 pub mod report;
 pub mod scan;
+pub mod server;
 pub mod state;
 pub mod thumbs;
 

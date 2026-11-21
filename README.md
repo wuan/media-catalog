@@ -6,11 +6,15 @@ produces one WebP thumbnail per item, renders browsable HTML, and emits sharded
 JSON for client-side search. Build state lives in SQLite so reruns only process
 new or changed items.
 
-The archive and the web tree are served by the same web server:
+By default, the archive and the web tree are served by the same web server:
 
 - `/` → generated `public/` tree
 - `/media/` → read-only NAS mount (the originals)
 - `/thumbs/` → generated thumbnails inside `public/`
+
+When the web host cannot mount the NAS share, the optional
+`media-catalog-server` binary serves the generated tree and streams originals
+from a host that can read the media root. See [docs/server.md](docs/server.md).
 
 ## Requirements
 
@@ -320,6 +324,29 @@ server {
 
 HTML and JSON should revalidate; versioned thumbnails can be cached for a long
 time because a changed source changes the URL.
+
+### Runtime server (Rust)
+
+If nginx cannot alias the NAS mount, build and run the optional server instead:
+
+```sh
+cargo build --release --bin media-catalog-server
+
+export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
+./target/release/media-catalog-server \
+  --catalog-root "$HOME/.media-catalog" \
+  --media-root /Volumes/media/photos \
+  --bind 127.0.0.1:8080
+```
+
+It serves the catalog at `/`, streams `/media/` with byte ranges and conditional
+requests, and exposes `/healthz`. It binds to loopback by default, reads the
+access token from `MEDIA_CATALOG_TOKEN`, and never writes to either root.
+
+Keep `public/` and `state.sqlite` on local disk; SQLite WAL is not supported on
+network filesystems. The media root can stay on the NAS. A media-gateway and
+reverse-proxy topology, systemd/launchd examples, TLS guidance, and the
+browser-playback matrix are documented in [docs/server.md](docs/server.md).
 
 ### Snapshot or rsync deployment
 

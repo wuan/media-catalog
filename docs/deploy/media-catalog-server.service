@@ -1,0 +1,20 @@
+[Unit]
+Description=Media catalog HTTP server
+Documentation=file:/usr/share/doc/media-catalog-server/server.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/media-catalog-server --catalog-root /srv/media-catalog --media-root /mnt/nas/media --bind 127.0.0.1:8080
+EnvironmentFile=-/etc/media-catalog/server.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/srv/media-catalog /mnt/nas/media
+
+[Install]
+WantedBy=multi-user.target
