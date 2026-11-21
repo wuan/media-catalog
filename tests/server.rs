@@ -16,39 +16,40 @@ use tower::ServiceExt;
 
 struct Fixture {
     _temp: TempDir,
-    public: PathBuf,
+    data: PathBuf,
     media: PathBuf,
 }
 
 impl Fixture {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
-        let catalog = temp.path().join("catalog");
-        let public = catalog.join("public");
+        let data = temp.path().join("data");
+        let state = temp.path().join("state");
         let media = temp.path().join("media");
 
-        fs::create_dir_all(public.join("catalog")).unwrap();
-        fs::create_dir_all(public.join("thumbs/2024/05")).unwrap();
+        fs::create_dir_all(data.join("catalog")).unwrap();
+        fs::create_dir_all(data.join("thumbs/2024/05")).unwrap();
+        fs::create_dir_all(&state).unwrap();
         fs::create_dir_all(media.join("2024/05")).unwrap();
 
-        write_catalog(&public, &fixture_catalog());
+        write_catalog(&data, &fixture_catalog());
 
         // Obsolete generated files may remain after an upgrade; the server must
         // ignore them and serve rendered pages and embedded assets instead.
-        fs::create_dir_all(public.join("assets")).unwrap();
-        fs::write(public.join("index.html"), "<h1>obsolete root file</h1>").unwrap();
-        fs::write(public.join("search.html"), "<h1>obsolete search file</h1>").unwrap();
-        fs::write(public.join("assets/site.css"), "obsolete css").unwrap();
-        fs::write(public.join("assets/search.js"), "obsolete js").unwrap();
+        fs::create_dir_all(data.join("assets")).unwrap();
+        fs::write(data.join("index.html"), "<h1>obsolete root file</h1>").unwrap();
+        fs::write(data.join("search.html"), "<h1>obsolete search file</h1>").unwrap();
+        fs::write(data.join("assets/site.css"), "obsolete css").unwrap();
+        fs::write(data.join("assets/search.js"), "obsolete js").unwrap();
 
-        fs::write(public.join("thumbs/2024/05/a.jpg.webp"), b"thumbnail-bytes").unwrap();
+        fs::write(data.join("thumbs/2024/05/a.jpg.webp"), b"thumbnail-bytes").unwrap();
         fs::write(
-            public.join("thumbs/2024/05/Familie Müller #1.jpg.webp"),
+            data.join("thumbs/2024/05/Familie Müller #1.jpg.webp"),
             b"unicode-thumbnail",
         )
         .unwrap();
         fs::write(
-            public.join("thumbs/2024/05/clip.mp4.webp"),
+            data.join("thumbs/2024/05/clip.mp4.webp"),
             b"video-thumbnail",
         )
         .unwrap();
@@ -63,19 +64,19 @@ impl Fixture {
         fs::write(media.join("2024/05/large.mp4"), vec![0xAB; 4 * 1024 * 1024]).unwrap();
         fs::write(media.join("2024/05/notes.txt"), b"not-media").unwrap();
 
-        // State files deliberately live outside the served public tree.
-        fs::write(catalog.join("state.sqlite"), b"state").unwrap();
-        fs::write(catalog.join("build.lock"), b"").unwrap();
+        // State files deliberately live outside the served data tree.
+        fs::write(state.join("state.sqlite"), b"state").unwrap();
+        fs::write(state.join("build.lock"), b"").unwrap();
 
         Self {
             _temp: temp,
-            public,
+            data,
             media,
         }
     }
 
     fn config(&self) -> ServerConfig {
-        ServerConfig::new(&self.public, &self.media)
+        ServerConfig::new(&self.data, &self.media)
     }
 }
 
@@ -119,9 +120,9 @@ fn item_catalog(items: Vec<CatalogItemInput>) -> Catalog {
     build_catalog(items, "/media", "/thumbs")
 }
 
-fn write_catalog(public: &Path, catalog: &Catalog) {
+fn write_catalog(data: &Path, catalog: &Catalog) {
     let output = json::render_json(catalog).unwrap();
-    let catalog_dir = public.join("catalog");
+    let catalog_dir = data.join("catalog");
     fs::create_dir_all(&catalog_dir).unwrap();
     for (year, shard) in &output.shards {
         fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();
@@ -264,7 +265,7 @@ async fn renders_catalog_pages_and_hides_state() {
 async fn escapes_hostile_names_and_links_originals() {
     let fixture = Fixture::new();
     let hostile = item_catalog(vec![item("2024/05/<script>alert(1).jpg", MediaKind::Image)]);
-    write_catalog(&fixture.public, &hostile);
+    write_catalog(&fixture.data, &hostile);
     let app = router(fixture.config()).unwrap();
 
     let (status, _, body) = send(app.clone(), Method::GET, "/2024/05/").await;
@@ -685,15 +686,15 @@ async fn graceful_shutdown_drains_and_releases_port() {
 async fn startup_validation_still_requires_the_media_root() {
     let fixture = Fixture::new();
     let missing = fixture._temp.path().join("missing-media");
-    let config = ServerConfig::new(&fixture.public, missing);
+    let config = ServerConfig::new(&fixture.data, missing);
     assert!(router(config).is_err());
 }
 
 #[tokio::test]
 async fn starts_without_a_catalog_and_recovers_when_one_appears() {
     let fixture = Fixture::new();
-    let late_public = fixture._temp.path().join("late-public");
-    let config = ServerConfig::new(&late_public, &fixture.media);
+    let late_data = fixture._temp.path().join("late-data");
+    let config = ServerConfig::new(&late_data, &fixture.media);
     let app = router(config).unwrap();
 
     let (status, headers, body) = send(app.clone(), Method::GET, "/").await;
@@ -720,10 +721,37 @@ async fn starts_without_a_catalog_and_recovers_when_one_appears() {
     let (status, _, _) = send(app.clone(), Method::GET, "/2024/").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 
-    write_catalog(&late_public, &fixture_catalog());
+    write_catalog(&late_data, &fixture_catalog());
     let (status, _, body) = send(app.clone(), Method::GET, "/").await;
     assert_eq!(status, StatusCode::OK);
     assert!(String::from_utf8_lossy(&body).contains("2024"));
     let (status, _, _) = send(app.clone(), Method::GET, "/healthz").await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ignores_a_legacy_public_subtree() {
+    let fixture = Fixture::new();
+    let data = fixture._temp.path().join("legacy-data");
+    let legacy = data.join("public/catalog");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(legacy.join("index.json"), "{}").unwrap();
+
+    let app = router(ServerConfig::new(&data, &fixture.media)).unwrap();
+
+    let (status, _, body) = send(app.clone(), Method::GET, "/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("not available yet"));
+
+    let (status, _, _) = send(app.clone(), Method::GET, "/search.html").await;
+    assert_eq!(status, StatusCode::OK);
+
+    for path in ["/catalog/index.json", "/public/catalog/index.json"] {
+        let (status, _, _) = send(app.clone(), Method::GET, path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+
+    let (status, _, body) = send(app.clone(), Method::GET, "/healthz").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(String::from_utf8_lossy(&body).contains("catalog unavailable"));
 }

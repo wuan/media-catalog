@@ -60,7 +60,7 @@ async fn generator_output_is_served_end_to_end() {
         outcome.summary.errors
     );
 
-    let app = router(ServerConfig::new(&fixture.public, &fixture.media)).unwrap();
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
 
     let (status, headers, body) = send(&app, Method::GET, "/", Vec::new()).await;
     assert_eq!(status, StatusCode::OK);
@@ -133,7 +133,7 @@ async fn running_server_picks_up_a_catalog_update_without_restart() {
     fixture.write_image("2024/05/alpha.jpg", 24, 18, 1);
     run_with_config(fixture.config()).unwrap();
 
-    let app = router(ServerConfig::new(&fixture.public, &fixture.media)).unwrap();
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
 
     let (status, headers, body) = send(&app, Method::GET, "/2024/05/", Vec::new()).await;
     assert_eq!(status, StatusCode::OK);

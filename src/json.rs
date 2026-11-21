@@ -320,9 +320,9 @@ pub fn load_catalog(catalog_dir: &Path) -> Result<Catalog> {
 
 /// Write one shard per year first, then `catalog/index.json` as the commit
 /// point, then remove stale shards for years no longer referenced.
-pub fn write_json(public_root: &Path, catalog: &Catalog) -> Result<usize> {
+pub fn write_json(data_root: &Path, catalog: &Catalog) -> Result<usize> {
     let output = render_json(catalog)?;
-    let catalog_dir = public_root.join("catalog");
+    let catalog_dir = data_root.join("catalog");
     let mut written = 0;
     let mut expected = BTreeSet::new();
 

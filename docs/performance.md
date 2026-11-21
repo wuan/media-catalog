@@ -8,12 +8,13 @@ resident set size.
 
 Source: a copied subset of `MEDIA_CATALOG_DATA` (90 files, 489 MB, 80 images and
 6 videos, plus 4 files outside the `YYYY/MM` hierarchy that are correctly
-skipped). Build into a separate temporary catalog root:
+skipped). Build into separate temporary data and state roots:
 
 ```sh
 target/release/media-catalog \
   --media-root "$REAL/media" \
-  --catalog-root "$REAL/catalog" \
+  --data-root "$REAL/data" \
+  --state-root "$REAL/state" \
   --jobs 6 \
   --quiet
 ```

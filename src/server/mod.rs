@@ -29,7 +29,7 @@ use support::{error_response, text_response};
 /// Runtime configuration for the read-only server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    pub public_root: PathBuf,
+    pub data_root: PathBuf,
     pub media_root: PathBuf,
     pub bind: SocketAddr,
     pub token: Option<String>,
@@ -38,9 +38,9 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     /// Build a configuration with the default loopback bind and no access token.
-    pub fn new(public_root: impl Into<PathBuf>, media_root: impl Into<PathBuf>) -> Self {
+    pub fn new(data_root: impl Into<PathBuf>, media_root: impl Into<PathBuf>) -> Self {
         Self {
-            public_root: public_root.into(),
+            data_root: data_root.into(),
             media_root: media_root.into(),
             bind: "127.0.0.1:8080"
                 .parse()
@@ -50,7 +50,7 @@ impl ServerConfig {
         }
     }
 
-    /// Canonicalize and validate the roots before serving. The catalog root may
+    /// Canonicalize and validate the roots before serving. The data root may
     /// be absent until the generator publishes a catalog; the media root is
     /// required because `/media/` depends on it.
     pub fn validate(self) -> Result<Self> {
@@ -58,28 +58,26 @@ impl ServerConfig {
             bail!("--max-streams must be at least 1");
         }
 
-        let public_root = match std::fs::canonicalize(&self.public_root) {
+        let data_root = match std::fs::canonicalize(&self.data_root) {
             Ok(path) => {
                 if !path.is_dir() {
-                    bail!("catalog public root is not a directory: {}", path.display());
+                    bail!("data root is not a directory: {}", path.display());
                 }
                 path
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let absolute = if self.public_root.is_absolute() {
-                    self.public_root.clone()
+                let absolute = if self.data_root.is_absolute() {
+                    self.data_root.clone()
                 } else {
                     std::env::current_dir()
                         .context("reading the current directory")?
-                        .join(&self.public_root)
+                        .join(&self.data_root)
                 };
                 crate::config::normalize_lexically(&absolute)
             }
             Err(error) => {
-                return Err(anyhow::Error::new(error).context(format!(
-                    "resolving catalog public root {}",
-                    self.public_root.display()
-                )));
+                return Err(anyhow::Error::new(error)
+                    .context(format!("resolving data root {}", self.data_root.display())));
             }
         };
 
@@ -89,16 +87,16 @@ impl ServerConfig {
             bail!("media root is not a directory: {}", media_root.display());
         }
 
-        if public_root.starts_with(&media_root) || media_root.starts_with(&public_root) {
+        if data_root.starts_with(&media_root) || media_root.starts_with(&data_root) {
             bail!(
-                "catalog public root and media root must be separate directories: {} and {}",
-                public_root.display(),
+                "data root and media root must be separate directories: {} and {}",
+                data_root.display(),
                 media_root.display()
             );
         }
 
         Ok(Self {
-            public_root,
+            data_root,
             media_root,
             ..self
         })
@@ -113,9 +111,9 @@ impl ServerConfig {
     about = "Render the published media catalog and serve read-only originals over HTTP"
 )]
 pub struct ServeCli {
-    /// Catalog root containing the generated `public/` tree.
+    /// Root for published catalog data. Contains `catalog/` and `thumbs/`.
     #[arg(long, value_name = "PATH")]
-    pub catalog_root: PathBuf,
+    pub data_root: PathBuf,
 
     /// Root of the read-only media archive.
     #[arg(long, value_name = "PATH")]
@@ -131,14 +129,14 @@ pub struct ServeCli {
 }
 
 impl ServeCli {
-    /// Resolve the catalog root into its public tree and read the access token
-    /// from `MEDIA_CATALOG_TOKEN` rather than the command line.
+    /// Build the server configuration and read the access token from
+    /// `MEDIA_CATALOG_TOKEN` rather than the command line.
     pub fn into_config(self) -> ServerConfig {
         let token = std::env::var("MEDIA_CATALOG_TOKEN")
             .ok()
             .filter(|value| !value.is_empty());
         ServerConfig {
-            public_root: self.catalog_root.join("public"),
+            data_root: self.data_root,
             media_root: self.media_root,
             bind: self.bind,
             token,
@@ -149,7 +147,7 @@ impl ServeCli {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub(crate) public_root: PathBuf,
+    pub(crate) data_root: PathBuf,
     pub(crate) media_root: PathBuf,
     pub(crate) token: Option<Arc<str>>,
     pub(crate) media_streams: Arc<Semaphore>,
@@ -159,8 +157,8 @@ pub struct AppState {
 impl AppState {
     fn from_config(config: ServerConfig) -> Self {
         Self {
-            catalog: Arc::new(CatalogStore::new(config.public_root.clone())),
-            public_root: config.public_root,
+            catalog: Arc::new(CatalogStore::new(config.data_root.clone())),
+            data_root: config.data_root,
             media_root: config.media_root,
             token: config.token.map(Arc::from),
             media_streams: Arc::new(Semaphore::new(config.max_streams)),
@@ -207,7 +205,7 @@ pub fn router_from_state(state: AppState) -> Router {
         .route("/thumbs/{*path}", get(static_files::serve_static))
         .route("/media/{*path}", get(media::serve_media))
         // Everything else is not part of the runtime contract: obsolete static
-        // HTML and asset files left in public/ are not served.
+        // HTML and asset files in the data root are not served.
         .fallback(not_found)
         .with_state(state.clone());
 
@@ -236,7 +234,7 @@ pub async fn serve(config: ServerConfig) -> Result<()> {
     let local = listener.local_addr().context("reading listener address")?;
 
     eprintln!("media-catalog-server listening on http://{local}");
-    eprintln!("  catalog: {}", config.public_root.display());
+    eprintln!("  data:    {}", config.data_root.display());
     eprintln!("  media:   {}", config.media_root.display());
     if !config.media_root.is_dir() {
         eprintln!("warning: media root is unavailable; /media requests will return 503");
@@ -387,8 +385,8 @@ mod tests {
     fn cli_defaults_to_loopback() {
         let cli = ServeCli::try_parse_from([
             "media-catalog-server",
-            "--catalog-root",
-            "/tmp/catalog",
+            "--data-root",
+            "/tmp/data",
             "--media-root",
             "/tmp/media",
         ])
@@ -398,8 +396,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_data_root() {
+        let error =
+            ServeCli::try_parse_from(["media-catalog-server", "--media-root", "/tmp/media"])
+                .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("--data-root"), "error was: {message}");
+    }
+
+    #[test]
     fn rejects_missing_roots() {
-        let config = ServerConfig::new("/definitely/missing/public", "/definitely/missing/media");
+        let config = ServerConfig::new("/definitely/missing/data", "/definitely/missing/media");
         assert!(config.validate().is_err());
     }
 

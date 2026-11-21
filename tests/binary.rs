@@ -17,8 +17,10 @@ fn restricted_path_produces_a_configuration_error_and_nonzero_exit() {
         .args([
             "--media-root",
             fixture.media.to_str().unwrap(),
-            "--catalog-root",
-            fixture.root().to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
             "--quiet",
         ])
         .env("PATH", "/nonexistent-bin")
@@ -32,7 +34,7 @@ fn restricted_path_produces_a_configuration_error_and_nonzero_exit() {
         "stderr was: {stderr}"
     );
     assert!(stderr.contains("PATH"));
-    assert!(!fixture.public.exists());
+    assert!(!fixture.data.exists());
 }
 
 #[test]
@@ -50,7 +52,8 @@ fn help_starts_and_documents_flags() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for flag in [
         "--media-root",
-        "--catalog-root",
+        "--data-root",
+        "--state-root",
         "--media-url-prefix",
         "--thumb-url-prefix",
         "--jobs",
@@ -62,6 +65,10 @@ fn help_starts_and_documents_flags() {
     ] {
         assert!(stdout.contains(flag), "help missing {flag}: {stdout}");
     }
+    assert!(
+        !stdout.contains("--catalog-root"),
+        "help still documents --catalog-root: {stdout}"
+    );
 }
 
 #[test]
@@ -74,8 +81,10 @@ fn failing_item_keeps_catalog_and_exits_nonzero() {
         .args([
             "--media-root",
             fixture.media.to_str().unwrap(),
-            "--catalog-root",
-            fixture.root().to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
             "--quiet",
         ])
         .output()
@@ -85,12 +94,12 @@ fn failing_item_keeps_catalog_and_exits_nonzero() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Errors: 1"), "stdout was: {stdout}");
     assert!(stdout.contains("bad.jpg"));
-    assert!(fixture.public_path("catalog/index.json").exists());
-    assert!(fixture.public_path("catalog/2024.json").exists());
+    assert!(fixture.data_path("catalog/index.json").exists());
+    assert!(fixture.data_path("catalog/2024.json").exists());
     assert!(fixture
         .read_json("catalog/2024.json")
         .contains("\"thumb_available\": false"));
-    assert!(!fixture.public_path("2024/05/index.html").exists());
+    assert!(!fixture.data_path("2024/05/index.html").exists());
 }
 
 #[test]
@@ -102,8 +111,10 @@ fn progress_is_reported_on_stderr_unless_quiet() {
         .args([
             "--media-root",
             fixture.media.to_str().unwrap(),
-            "--catalog-root",
-            fixture.root().to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
             "--jobs",
             "2",
         ])
@@ -116,6 +127,12 @@ fn progress_is_reported_on_stderr_unless_quiet() {
         String::from_utf8_lossy(&noisy.stderr)
     );
     let stderr = String::from_utf8_lossy(&noisy.stderr);
+    assert!(stderr.contains("Data root:"), "stderr was: {stderr}");
+    assert!(stderr.contains("State root:"), "stderr was: {stderr}");
+    assert!(
+        !stderr.to_ascii_lowercase().contains("catalog root"),
+        "stderr was: {stderr}"
+    );
     assert!(stderr.contains("Scanning"), "stderr was: {stderr}");
     assert!(stderr.contains("Scanned 1 items"), "stderr was: {stderr}");
     assert!(stderr.contains("Probing 1 items"), "stderr was: {stderr}");
@@ -132,8 +149,10 @@ fn progress_is_reported_on_stderr_unless_quiet() {
         .args([
             "--media-root",
             fixture.media.to_str().unwrap(),
-            "--catalog-root",
-            fixture.root().to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
             "--jobs",
             "2",
             "--quiet",
@@ -159,8 +178,10 @@ fn documented_command_builds_a_fixture() {
         .args([
             "--media-root",
             fixture.media.to_str().unwrap(),
-            "--catalog-root",
-            fixture.root().to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
             "--jobs",
             "2",
             "--quiet",
@@ -176,7 +197,7 @@ fn documented_command_builds_a_fixture() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Scanned: 1 items"));
     assert!(stdout.contains("Thumbnails: 1 generated"));
-    assert!(fixture.public_path("catalog/index.json").exists());
-    assert!(fixture.public_path("catalog/2024.json").exists());
+    assert!(fixture.data_path("catalog/index.json").exists());
+    assert!(fixture.data_path("catalog/2024.json").exists());
     assert!(fixture.thumb_path("2024/05/a.jpg").exists());
 }

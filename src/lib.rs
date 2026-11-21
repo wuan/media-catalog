@@ -80,7 +80,8 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     config.validate()?;
     probe::ensure_external_tools().context("configuration error")?;
     let progress = Progress::new(config.quiet);
-    progress.detail(format!("Catalog root: {}", config.catalog_root.display()));
+    progress.detail(format!("Data root: {}", config.data_root.display()));
+    progress.detail(format!("State root: {}", config.state_root.display()));
 
     let started = Instant::now();
     let mut summary = RunSummary {
@@ -296,7 +297,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
         let record = records_after_probe.get(&file.rel_path);
         let version = fingerprint::thumb_version(file.size, file.mtime_ns);
         let thumb_rel = thumb_rel_path(&file.rel_path);
-        let destination = config.public_root.join(&thumb_rel);
+        let destination = config.data_root.join(&thumb_rel);
         let needs_work = config.force
             || record
                 .map(|record| {
@@ -438,7 +439,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     let catalog = model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
 
     progress.phase("Publishing JSON catalog");
-    summary.json_files_written = json::write_json(&config.public_root, &catalog)?;
+    summary.json_files_written = json::write_json(&config.data_root, &catalog)?;
     progress.phase(format!(
         "Published {} JSON files",
         summary.json_files_written
@@ -469,7 +470,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
                     }
                 }
             }
-            summary.pruned = prune::prune_orphans(&config.public_root, &expected)?;
+            summary.pruned = prune::prune_orphans(&config.data_root, &expected)?;
             progress.phase(format!("Pruned {} orphan thumbnails", summary.pruned));
         }
     }

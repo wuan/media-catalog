@@ -8,8 +8,8 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/media-catalog-server</string>
-    <string>--catalog-root</string>
-    <string>/Users/andi/.media-catalog</string>
+    <string>--data-root</string>
+    <string>/Users/andi/.media-catalog/data</string>
     <string>--media-root</string>
     <string>/Volumes/media/photos</string>
     <string>--bind</string>

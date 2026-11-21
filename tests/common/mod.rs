@@ -8,11 +8,11 @@ use tempfile::TempDir;
 use media_catalog::config::Config;
 use media_catalog::probe;
 
-/// A temporary media tree plus output and state locations.
+/// A temporary media tree plus separate published-data and build-state roots.
 pub struct Fixture {
     temp: TempDir,
     pub media: PathBuf,
-    pub public: PathBuf,
+    pub data: PathBuf,
     pub state: PathBuf,
 }
 
@@ -20,20 +20,19 @@ impl Fixture {
     pub fn new() -> Self {
         let temp = tempfile::tempdir().expect("tempdir");
         let media = temp.path().join("media");
-        let public = temp.path().join("public");
-        let state = temp.path().join("state.sqlite");
+        let data = temp.path().join("data");
+        let state = temp.path().join("state");
         std::fs::create_dir_all(&media).expect("media dir");
         Self {
             temp,
             media,
-            public,
+            data,
             state,
         }
     }
 
     pub fn config(&self) -> Config {
-        let mut config = Config::with_roots(&self.media, self.root());
-        config.state_db = self.state.clone();
+        let mut config = Config::with_roots(&self.media, &self.data, &self.state);
         config.jobs = 2;
         config.quiet = true;
         config
@@ -47,8 +46,12 @@ impl Fixture {
         self.media.join(rel)
     }
 
-    pub fn public_path(&self, rel: &str) -> PathBuf {
-        self.public.join(rel)
+    pub fn data_path(&self, rel: &str) -> PathBuf {
+        self.data.join(rel)
+    }
+
+    pub fn state_db(&self) -> PathBuf {
+        self.state.join("state.sqlite")
     }
 
     pub fn write_bytes(&self, rel: &str, bytes: &[u8]) {
@@ -140,7 +143,7 @@ impl Fixture {
     }
 
     pub fn thumb_path(&self, rel: &str) -> PathBuf {
-        self.public.join(format!("thumbs/{rel}.webp"))
+        self.data.join(format!("thumbs/{rel}.webp"))
     }
 
     pub fn thumb_mtime(&self, rel: &str) -> std::time::SystemTime {
@@ -151,11 +154,11 @@ impl Fixture {
     }
 
     pub fn read_json(&self, rel: &str) -> String {
-        std::fs::read_to_string(self.public_path(rel)).expect("read json")
+        std::fs::read_to_string(self.data_path(rel)).expect("read json")
     }
 
     pub fn read_html(&self, rel: &str) -> String {
-        std::fs::read_to_string(self.public_path(rel)).expect("read html")
+        std::fs::read_to_string(self.data_path(rel)).expect("read html")
     }
 }
 

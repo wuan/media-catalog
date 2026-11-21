@@ -66,8 +66,8 @@ pub async fn resolve_file(root: &Path, segments: &[String]) -> Result<PathBuf, R
     Ok(canonical)
 }
 
-/// Resolve a public-tree path, mapping directories to their `index.html`.
-pub async fn resolve_public(root: &Path, segments: &[String]) -> Result<PathBuf, ResolveError> {
+/// Resolve a published data path, mapping directories to their `index.html`.
+pub async fn resolve_data(root: &Path, segments: &[String]) -> Result<PathBuf, ResolveError> {
     let path = resolve_file(root, segments).await?;
     let metadata = tokio::fs::metadata(&path).await.map_err(map_io_error)?;
     if metadata.is_dir() {

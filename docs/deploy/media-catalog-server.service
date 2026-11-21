@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/media-catalog-server --catalog-root /srv/media-catalog --media-root /mnt/nas/media --bind 127.0.0.1:8080
+ExecStart=/usr/local/bin/media-catalog-server --data-root /srv/media-catalog/data --media-root /mnt/nas/media --bind 127.0.0.1:8080
 EnvironmentFile=-/etc/media-catalog/server.env
 Restart=on-failure
 RestartSec=5
@@ -15,7 +15,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 # The leading '-' lets the service start before the catalog is published.
-ReadOnlyPaths=-/srv/media-catalog /mnt/nas/media
+ReadOnlyPaths=-/srv/media-catalog/data /mnt/nas/media
 
 [Install]
 WantedBy=multi-user.target

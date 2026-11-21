@@ -40,20 +40,20 @@ pub struct CatalogSnapshot {
 
 /// Loads and caches the catalog snapshot, reloading only when the index changes.
 pub struct CatalogStore {
-    public_root: PathBuf,
+    data_root: PathBuf,
     snapshot: Mutex<Option<Arc<CatalogSnapshot>>>,
 }
 
 impl CatalogStore {
-    pub fn new(public_root: PathBuf) -> Self {
+    pub fn new(data_root: PathBuf) -> Self {
         Self {
-            public_root,
+            data_root,
             snapshot: Mutex::new(None),
         }
     }
 
     fn index_path(&self) -> PathBuf {
-        self.public_root.join("catalog/index.json")
+        self.data_root.join("catalog/index.json")
     }
 
     /// Whether a catalog index has been published. Used for readiness reporting.
@@ -78,7 +78,7 @@ impl CatalogStore {
             }
         }
 
-        match load_snapshot(&self.public_root) {
+        match load_snapshot(&self.data_root) {
             Ok(Some(snapshot)) => {
                 let snapshot = Arc::new(snapshot);
                 *guard = Some(snapshot.clone());
@@ -109,9 +109,9 @@ fn index_id(path: &std::path::Path) -> Option<SnapshotId> {
     })
 }
 
-fn load_snapshot(public_root: &std::path::Path) -> Result<Option<CatalogSnapshot>> {
-    let index_path = public_root.join("catalog/index.json");
-    let catalog_dir = public_root.join("catalog");
+fn load_snapshot(data_root: &std::path::Path) -> Result<Option<CatalogSnapshot>> {
+    let index_path = data_root.join("catalog/index.json");
+    let catalog_dir = data_root.join("catalog");
 
     for _ in 0..3 {
         let Some(before) = index_id(&index_path) else {
@@ -326,9 +326,9 @@ mod tests {
         }
     }
 
-    fn write_catalog(public_root: &std::path::Path, catalog: &Catalog) {
+    fn write_catalog(data_root: &std::path::Path, catalog: &Catalog) {
         let output = crate::json::render_json(catalog).unwrap();
-        let catalog_dir = public_root.join("catalog");
+        let catalog_dir = data_root.join("catalog");
         std::fs::create_dir_all(&catalog_dir).unwrap();
         for (year, shard) in &output.shards {
             std::fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();

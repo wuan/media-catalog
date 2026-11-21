@@ -221,8 +221,8 @@ pub fn encode_webp(image: &DynamicImage, quality: f32) -> Result<Vec<u8>> {
 }
 
 /// Destination path for a source relative path.
-pub fn thumb_destination(public_root: &Path, src_rel_path: &str) -> PathBuf {
-    crate::paths::thumb_abs_path(public_root, src_rel_path)
+pub fn thumb_destination(data_root: &Path, src_rel_path: &str) -> PathBuf {
+    crate::paths::thumb_abs_path(data_root, src_rel_path)
 }
 
 /// Read-only access to the EXIF fields used by the raster decoder.

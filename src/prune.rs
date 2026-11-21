@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use walkdir::WalkDir;
 
-/// Delete files under `public/thumbs/` that are not in `expected`.
+/// Delete files under `thumbs/` in the data root that are not in `expected`.
 ///
-/// `expected` contains public-tree-relative paths such as
+/// `expected` contains data-root-relative paths such as
 /// `thumbs/2024/05/a.jpg.webp`. The walk is confined to the thumbnail tree;
 /// symlinks are never followed or removed and empty directories are cleaned up.
-pub fn prune_orphans(public_root: &Path, expected: &HashSet<String>) -> Result<usize> {
-    let thumbs_root = public_root.join("thumbs");
+pub fn prune_orphans(data_root: &Path, expected: &HashSet<String>) -> Result<usize> {
+    let thumbs_root = data_root.join("thumbs");
     if !thumbs_root.exists() {
         return Ok(0);
     }
@@ -49,7 +49,7 @@ pub fn prune_orphans(public_root: &Path, expected: &HashSet<String>) -> Result<u
         }
 
         let rel = path
-            .strip_prefix(public_root)
+            .strip_prefix(data_root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");

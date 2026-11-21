@@ -6,27 +6,9 @@ Defines the deployable static web output: browsable year and month pages, sharde
 
 ## Requirements
 
-### Requirement: Provide a browsable static hierarchy
-The generator SHALL emit a root years index, a per-year months index, and a per-month item grid, all as static HTML pages that render without JavaScript.
-
-#### Scenario: Root index
-- **WHEN** the catalog contains items from 2023 and 2024
-- **THEN** `index.html` lists both years with links to their year pages
-
-#### Scenario: Year page
-- **WHEN** a year page is opened
-- **THEN** it lists that year's months and links to each month grid
-
-#### Scenario: Month grid
-- **WHEN** a month page is opened
-- **THEN** it shows the month's thumbnails with dates, type markers, and links to originals
-
-#### Scenario: JavaScript disabled
-- **WHEN** the browser has JavaScript disabled
-- **THEN** the hierarchy and month grids remain fully browsable
-
 ### Requirement: Use same-origin root-relative media URLs
-The generator SHALL reference thumbnails under `/thumbs/` and originals under `/media/` using same-origin root-relative URLs, and SHALL percent-encode path segments.
+
+The catalog SHALL reference thumbnails under `/thumbs/` and originals under `/media/` using same-origin root-relative URLs, and SHALL percent-encode path segments in JSON and rendered pages.
 
 #### Scenario: Same-origin serving
 - **WHEN** the web tree is served at `/` and the media root is mounted at `/media/`
@@ -37,7 +19,8 @@ The generator SHALL reference thumbnails under `/thumbs/` and originals under `/
 - **THEN** its thumbnail and media URLs encode the segments correctly and the link resolves
 
 ### Requirement: Keep month pages lightweight
-The generator SHALL lazy-load month thumbnails and SHALL NOT emit a separate HTML page per item.
+
+The runtime SHALL lazy-load month thumbnails and SHALL NOT emit a separate HTML page per item.
 
 #### Scenario: Large month
 - **WHEN** a month contains roughly 500 items
@@ -48,7 +31,8 @@ The generator SHALL lazy-load month thumbnails and SHALL NOT emit a separate HTM
 - **THEN** the original opens directly from `/media/` rather than a generated detail page
 
 ### Requirement: Emit sharded JSON catalog data
-The generator SHALL emit `catalog/index.json` describing years, counts, and shard paths, and one `catalog/YYYY.json` shard per year containing item records with paths, kind, timestamps, dimensions, duration, thumbnail URL, and media URL.
+
+The generator SHALL emit `catalog/index.json` describing years, counts, and shard paths directly under the configured data root, and one `catalog/YYYY.json` shard per year containing item records with paths, kind, timestamps, dimensions, duration, thumbnail URL, and media URL.
 
 #### Scenario: Year shards
 - **WHEN** the catalog spans multiple years
@@ -58,8 +42,13 @@ The generator SHALL emit `catalog/index.json` describing years, counts, and shar
 - **WHEN** a shard is read
 - **THEN** each item record provides enough data to render a thumbnail link and open the original without additional requests
 
+#### Scenario: Data root location
+- **WHEN** the generator publishes with the data root at `./data`
+- **THEN** the index is written to `./data/catalog/index.json` and shards to `./data/catalog/YYYY.json`, with no `public/` segment
+
 ### Requirement: Provide a static search and filter page
-The generator SHALL emit `search.html` that loads the JSON index and year shards in the browser and filters items by text, type, year, and month without a backend service.
+
+The runtime SHALL serve `search.html` that loads the JSON index and year shards in the browser and filters items by text, type, year, and month without a backend service.
 
 #### Scenario: Global text search
 - **WHEN** a visitor types part of a filename into the search page
@@ -74,18 +63,20 @@ The generator SHALL emit `search.html` that loads the JSON index and year shards
 - **THEN** the search page still provides links to the browsable hierarchy
 
 ### Requirement: Produce deterministic static output
-The generator SHALL produce identical page, JSON, and thumbnail URLs for an unchanged catalog across repeated runs, excluding fields intentionally tied to the run itself.
+
+The system SHALL produce identical JSON, thumbnail URLs, and server-rendered catalog pages for an unchanged catalog across repeated runs, excluding fields intentionally tied to the run itself.
 
 #### Scenario: Repeat build
 - **WHEN** the generator runs twice against an unchanged media tree
-- **THEN** the generated HTML and JSON are byte-identical apart from permitted run metadata
+- **THEN** the emitted JSON is byte-identical and the runtime renders identical catalog pages apart from permitted run metadata
 
 #### Scenario: Changed item only
 - **WHEN** one item changes in a month
 - **THEN** that item's thumbnail URL changes while unchanged items keep their URLs
 
 ### Requirement: Escape untrusted names in HTML
-The generator SHALL HTML-escape item names and metadata when rendering pages and SHALL provide alternative text for thumbnails.
+
+The runtime SHALL HTML-escape item names and metadata when rendering pages and SHALL provide alternative text for thumbnails.
 
 #### Scenario: Filename containing markup
 - **WHEN** a filename contains characters such as `<script>`
@@ -94,3 +85,23 @@ The generator SHALL HTML-escape item names and metadata when rendering pages and
 #### Scenario: Accessibility
 - **WHEN** a thumbnail is rendered
 - **THEN** it has alternative text derived from the item name or capture date
+
+### Requirement: Provide a browsable catalog hierarchy
+
+The runtime SHALL serve a root years index, a per-year months index, and a per-month item grid at the existing catalog routes, rendered from the published catalog as HTML pages that work without JavaScript.
+
+#### Scenario: Root index
+- **WHEN** the catalog contains items from 2023 and 2024
+- **THEN** `/` lists both years with links to their year pages
+
+#### Scenario: Year page
+- **WHEN** a year page is opened
+- **THEN** it lists that year's months and links to each month grid
+
+#### Scenario: Month grid
+- **WHEN** a month page is opened
+- **THEN** it shows the month's thumbnails with dates, type markers, and links to originals
+
+#### Scenario: JavaScript disabled
+- **WHEN** the browser has JavaScript disabled
+- **THEN** the hierarchy and month grids remain fully browsable

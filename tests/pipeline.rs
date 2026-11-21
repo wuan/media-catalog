@@ -10,7 +10,7 @@ use media_catalog::{json, render, run_with_config};
 use serde_json::Value;
 
 fn rendered_month(fixture: &Fixture, year: i32, month: u32) -> String {
-    let catalog = json::load_catalog(&fixture.public.join("catalog")).unwrap();
+    let catalog = json::load_catalog(&fixture.data.join("catalog")).unwrap();
     render::render_month(&catalog, year, month)
         .unwrap()
         .expect("month page")
@@ -38,8 +38,8 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
     assert_eq!(first.summary.thumbnails_skipped, 0);
     assert_eq!(first.summary.json_files_written, 2); // index plus one year shard
 
-    assert!(fixture.public_path("catalog/index.json").exists());
-    assert!(fixture.public_path("catalog/2024.json").exists());
+    assert!(fixture.data_path("catalog/index.json").exists());
+    assert!(fixture.data_path("catalog/2024.json").exists());
     for obsolete in [
         "index.html",
         "2024/index.html",
@@ -50,7 +50,7 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
         "assets/search.js",
     ] {
         assert!(
-            !fixture.public_path(obsolete).exists(),
+            !fixture.data_path(obsolete).exists(),
             "generator wrote obsolete {obsolete}"
         );
     }
@@ -89,7 +89,7 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
         .collect();
     assert_eq!(thumbs_before, thumbs_after);
 
-    let state = StateDb::open(&fixture.state).unwrap();
+    let state = StateDb::open(&fixture.state_db()).unwrap();
     assert_eq!(state.item_count().unwrap(), 3);
 }
 
@@ -167,7 +167,7 @@ fn deleted_items_disappear_and_prune_is_opt_in() {
     assert!(!fixture.thumb_path("2024/05/b.jpg").exists());
     assert!(fixture.thumb_path("2024/05/a.jpg").exists());
     assert!(fixture.thumb_path("2024/06/c.jpg").exists());
-    assert!(fixture.public_path("catalog/index.json").exists());
+    assert!(fixture.data_path("catalog/index.json").exists());
 }
 
 #[test]
@@ -191,7 +191,10 @@ fn mount_drop_blocks_cleanup_until_overridden() {
     assert_eq!(blocked.summary.deleted, 0);
     assert!(fixture.thumb_path("2024/05/5.jpg").exists());
     assert_eq!(
-        StateDb::open(&fixture.state).unwrap().item_count().unwrap(),
+        StateDb::open(&fixture.state_db())
+            .unwrap()
+            .item_count()
+            .unwrap(),
         6
     );
 
@@ -205,7 +208,10 @@ fn mount_drop_blocks_cleanup_until_overridden() {
     assert!(fixture.thumb_path("2024/05/0.jpg").exists());
     assert!(!fixture.thumb_path("2024/05/5.jpg").exists());
     assert_eq!(
-        StateDb::open(&fixture.state).unwrap().item_count().unwrap(),
+        StateDb::open(&fixture.state_db())
+            .unwrap()
+            .item_count()
+            .unwrap(),
         1
     );
 }
@@ -223,9 +229,9 @@ fn dry_run_writes_nothing() {
     assert_eq!(outcome.summary.scanned, 2);
     assert_eq!(outcome.summary.new, 2);
     assert!(outcome.summary.dry_run);
-    assert!(!fixture.public.exists());
+    assert!(!fixture.data.exists());
     assert!(!fixture.state.exists());
-    assert!(!fixture.root().join("build.lock").exists());
+    assert!(!fixture.state_db().exists());
 }
 
 #[cfg(unix)]
@@ -373,19 +379,19 @@ fn video_items_receive_posters_and_duration() {
 fn lock_blocks_a_concurrent_run_and_is_released() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);
-    let lock = BuildLock::acquire(&fixture.state).unwrap();
+    let lock = BuildLock::acquire(&fixture.state_db()).unwrap();
 
     let error = run_with_config(fixture.config()).unwrap_err();
     assert!(format!("{error:#}").contains("another build is already running"));
-    assert!(!fixture.public.exists());
+    assert!(!fixture.data.exists());
 
     drop(lock);
     run_with_config(fixture.config()).unwrap();
-    assert!(fixture.public_path("catalog/index.json").exists());
+    assert!(fixture.data_path("catalog/index.json").exists());
 }
 
 #[test]
-fn writes_only_the_public_tree_and_state_files() {
+fn writes_only_the_data_and_state_trees() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);
     fixture.write_image("2024/05/b.jpg", 20, 20, 2);
@@ -415,8 +421,8 @@ fn writes_only_the_public_tree_and_state_files() {
         }
         let rel = path.strip_prefix(fixture.root()).unwrap().to_string_lossy();
         assert!(
-            rel.starts_with("public/") || rel == "state.sqlite" || rel == "build.lock",
-            "unexpected file outside public/state: {rel}"
+            rel.starts_with("data/") || rel.starts_with("state/"),
+            "unexpected file outside data/state: {rel}"
         );
     }
 }
@@ -444,15 +450,15 @@ fn prune_never_touches_files_outside_the_thumbnail_tree() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);
     run_with_config(fixture.config()).unwrap();
-    // Simulate obsolete files left in public/ after upgrading from the static
-    // tree; prune must stay confined to public/thumbs/.
-    std::fs::write(fixture.public_path("index.html"), "legacy").unwrap();
-    std::fs::write(fixture.public_path("search.html"), "legacy").unwrap();
+    // Simulate obsolete files left in the data root after upgrading from the
+    // static tree; prune must stay confined to the thumbnail tree.
+    std::fs::write(fixture.data_path("index.html"), "legacy").unwrap();
+    std::fs::write(fixture.data_path("search.html"), "legacy").unwrap();
     let outside = HashSet::from([
-        fixture.public_path("index.html"),
-        fixture.public_path("search.html"),
-        fixture.public_path("catalog/index.json"),
-        fixture.public_path("catalog/2024.json"),
+        fixture.data_path("index.html"),
+        fixture.data_path("search.html"),
+        fixture.data_path("catalog/index.json"),
+        fixture.data_path("catalog/2024.json"),
     ]);
 
     let mut config = fixture.config();

@@ -39,7 +39,7 @@ fn search_filters_narrow_the_loaded_shards() {
         .args([
             script.as_str(),
             asset.as_str(),
-            fixture.public.to_str().unwrap(),
+            fixture.data.to_str().unwrap(),
         ])
         .output()
         .unwrap();

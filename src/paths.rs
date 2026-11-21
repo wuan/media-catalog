@@ -43,15 +43,15 @@ pub fn thumb_url(prefix: &str, src_rel_path: &str, version: &str) -> String {
     )
 }
 
-/// Public-tree-relative thumbnail path, mirroring the source path and appending
+/// Data-root-relative thumbnail path, mirroring the source path and appending
 /// `.webp` to the full file name (rather than replacing the extension).
 pub fn thumb_rel_path(src_rel_path: &str) -> String {
     format!("thumbs/{src_rel_path}.webp")
 }
 
-/// Absolute thumbnail destination under the public root.
-pub fn thumb_abs_path(public_root: &Path, src_rel_path: &str) -> PathBuf {
-    public_root.join(thumb_rel_path(src_rel_path))
+/// Absolute thumbnail destination under the data root.
+pub fn thumb_abs_path(data_root: &Path, src_rel_path: &str) -> PathBuf {
+    data_root.join(thumb_rel_path(src_rel_path))
 }
 
 /// Root-relative navigation URL for a year page.

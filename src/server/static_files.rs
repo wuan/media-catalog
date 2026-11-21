@@ -6,11 +6,11 @@ use tokio_util::io::ReaderStream;
 
 use super::support::{
     content_type_for, decode_segments, entity_tag, error_response, is_not_modified, last_modified,
-    method_not_allowed, not_modified_response, resolve_error_response, resolve_public, Segments,
+    method_not_allowed, not_modified_response, resolve_data, resolve_error_response, Segments,
 };
 use super::AppState;
 
-/// Serve a file from the generated public tree.
+/// Serve a file from the published data root.
 pub async fn serve_static(
     State(state): State<AppState>,
     method: Method,
@@ -47,7 +47,7 @@ pub async fn serve_static(
         return error_response(StatusCode::NOT_FOUND, "not found");
     }
 
-    let path = match resolve_public(&state.public_root, &segments).await {
+    let path = match resolve_data(&state.data_root, &segments).await {
         Ok(path) => path,
         Err(error) => return resolve_error_response(error),
     };

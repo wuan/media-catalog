@@ -7,15 +7,20 @@ Defines the build state that keeps repeated runs fast and safe: persistent SQLit
 ## Requirements
 
 ### Requirement: Persist build state in SQLite
-The generator SHALL store build state in a SQLite database outside the deployable web tree, recording each item's relative path, source fingerprint, extracted metadata, and thumbnail status.
+
+The generator SHALL store build state in a SQLite database under the configured state root outside the published data tree, recording each item's relative path, source fingerprint, extracted metadata, and thumbnail status.
 
 #### Scenario: First run
 - **WHEN** the generator runs for the first time
 - **THEN** it creates the state database and records every processed item
 
 #### Scenario: State outside output
-- **WHEN** the web tree is deployed
-- **THEN** the SQLite database is not part of the deployable files
+- **WHEN** the data root is served or backed up
+- **THEN** the SQLite database is not part of the published files
+
+#### Scenario: Explicit state root
+- **WHEN** the state root is configured as `./state`
+- **THEN** the generator creates or opens `./state/state.sqlite`
 
 ### Requirement: Skip unchanged items
 The generator SHALL use a fingerprint derived from file size and modification time to decide whether an item needs thumbnail regeneration, and SHALL reuse existing thumbnails and cached metadata for unchanged items.
@@ -40,22 +45,24 @@ The generator SHALL record each thumbnail as completed only after it is written 
 - **THEN** the next run retries that thumbnail rather than treating it as complete
 
 ### Requirement: Reflect deletions in generated output
-The generator SHALL remove deleted items from regenerated pages and JSON, and SHALL remove thumbnails that no longer belong to any catalog item when pruning is enabled.
+
+The generator SHALL remove deleted items from regenerated JSON, and SHALL remove thumbnails that no longer belong to any catalog item when pruning is enabled. Server-rendered pages SHALL reflect the published JSON catalog.
 
 #### Scenario: Deleted item
 - **WHEN** an item is removed from the media tree and the generator runs again
-- **THEN** it no longer appears in month pages or JSON
+- **THEN** it no longer appears in catalog JSON or server-rendered month pages
 
 #### Scenario: Prune enabled
 - **WHEN** pruning is enabled and a thumbnail has no corresponding catalog item
-- **THEN** the orphan thumbnail is deleted from the web tree
+- **THEN** the orphan thumbnail is deleted from the thumbnail tree
 
 #### Scenario: Prune disabled
 - **WHEN** pruning is not enabled
 - **THEN** orphan thumbnails may remain and no files outside the thumbnail tree are removed
 
 ### Requirement: Prevent concurrent builds
-The generator SHALL acquire a build lock and SHALL refuse to start when another build is already running against the same state.
+
+The generator SHALL acquire a build lock beside the state database in the state root and SHALL refuse to start when another build is already running against the same state root.
 
 #### Scenario: Overlapping manual run
 - **WHEN** a second build starts while the first still holds the lock
@@ -65,12 +72,21 @@ The generator SHALL acquire a build lock and SHALL refuse to start when another 
 - **WHEN** a build fails or is interrupted
 - **THEN** the lock is released and a later run can proceed
 
+#### Scenario: Lock location
+- **WHEN** the state root is configured as `./state`
+- **THEN** the lock file is `./state/build.lock`
+
 ### Requirement: Write output atomically
-The generator SHALL write pages and thumbnails through temporary files and atomic replacement so visitors never observe partially written output.
+
+The generator SHALL write JSON shards and thumbnails through temporary files and atomic replacement so visitors never observe partially written output.
+
+#### Scenario: Interrupted JSON write
+- **WHEN** the generator is interrupted while writing a JSON shard
+- **THEN** the previous complete shard remains in place or no partial shard is left behind
 
 #### Scenario: Interrupted page write
-- **WHEN** the generator is interrupted while writing a page
-- **THEN** the previous complete page remains in place or no partial page is left behind
+- **WHEN** the generator is interrupted while publishing catalog output
+- **THEN** the previous complete catalog remains in place or no partial output is left behind, and the runtime keeps serving the previous snapshot
 
 #### Scenario: Thumbnail replacement
 - **WHEN** a thumbnail is regenerated
@@ -86,3 +102,19 @@ The generator SHALL rebuild missing thumbnails when state is absent and SHALL pr
 #### Scenario: Force rebuild
 - **WHEN** the generator runs in force mode
 - **THEN** thumbnails are regenerated regardless of existing fingerprints
+
+### Requirement: Publish the catalog index last
+
+The generator SHALL write all referenced year shards before replacing `catalog/index.json`, so the runtime can treat the index as the commit point for a complete catalog snapshot.
+
+#### Scenario: Successful publication
+- **WHEN** the generator publishes a catalog update
+- **THEN** every shard referenced by the new index is already written when the new index becomes visible
+
+#### Scenario: Interrupted publication
+- **WHEN** the generator is interrupted after writing some shards but before writing the new index
+- **THEN** the previous index remains in place and the runtime continues serving the previous complete snapshot
+
+#### Scenario: Runtime reload
+- **WHEN** the runtime observes a new catalog index
+- **THEN** it can load every referenced shard without encountering a partially published catalog

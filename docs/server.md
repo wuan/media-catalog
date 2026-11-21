@@ -21,7 +21,7 @@ Browser
 |  /search.html       -> embedded shell            |
 |  /assets/*          -> embedded CSS/JS           |
 |  /catalog/*         -> published JSON            |
-|  /thumbs/*          -> public/thumbs/*           |
+|  /thumbs/*          -> data_root/thumbs/*        |
 |  /media/*           -> media_root/*              |
 |  /healthz           -> catalog/media readiness   |
 +--------------------------+-----------------------+
@@ -30,9 +30,9 @@ Browser
                     media mount (SMB/NFS/local)
 ```
 
-Keep `public/` and `state.sqlite` on local disk. SQLite WAL is not supported on
-network filesystems, and even rollback-journal mode is unreliable over SMB. Only
-the original media needs to live on the NAS.
+Keep the data root and the state root on local disk. SQLite WAL is not supported
+on network filesystems, and even rollback-journal mode is unreliable over SMB.
+Only the original media needs to live on the NAS.
 
 ## Build and run
 
@@ -41,12 +41,12 @@ cargo build --release --bin media-catalog-server
 
 export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
 ./target/release/media-catalog-server \
-  --catalog-root "$HOME/.media-catalog" \
+  --data-root "$HOME/.media-catalog/data" \
   --media-root /Volumes/media/photos \
   --bind 127.0.0.1:8080
 ```
 
-The catalog root may not contain `public/` yet. The service starts anyway, serves
+The data root may not contain a catalog yet. The service starts anyway, serves
 the shell and a bootstrap page, and begins rendering catalog pages when the
 generator publishes `catalog/index.json`. The media root remains required because
 `/media/` depends on it. The service binds to loopback by default. Add
@@ -68,8 +68,8 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 | `/{year}/`, `/{year}/{month}/` | rendered pages; `404` for unknown years/months; `503` before publication |
 | `/search.html` | embedded search shell, available without a catalog |
 | `/assets/site.css`, `/assets/search.js` | embedded assets, available without a catalog |
-| `/catalog/*` | published JSON from `public/catalog/`; `404` before publication |
-| `/thumbs/*` | generated thumbnails from `public/thumbs/` |
+| `/catalog/*` | published JSON from `data_root/catalog/`; `404` before publication |
+| `/thumbs/*` | generated thumbnails from `data_root/thumbs/` |
 | `/media/*` | read-only original stream |
 | `/healthz` | `200` when catalog and media are ready, otherwise `503` with a detail line |
 
@@ -90,7 +90,7 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
   rejected.
 - If the media root disappears, `/media/` returns `503`; catalog pages remain
   servable.
-- The service never writes to the catalog or media roots and never lists
+- The service never writes to the data or media roots and never lists
   directories.
 
 ## Catalog snapshot reload
@@ -114,19 +114,28 @@ the catalog is not yet available. `/healthz` reports catalog readiness separatel
 from media readiness so an operator can distinguish a missing build from a
 missing mount.
 
-## Migrating from the static tree
+## Migrating from the catalog-root layout
+
+Older deployments kept published data in `<catalog-root>/public`. There is no
+legacy fallback; move it into the data root before starting this server:
+
+```sh
+mv catalog/public data
+mkdir -p state
+mv catalog/state.sqlite catalog/build.lock state/
+```
 
 The server no longer serves pre-generated `index.html`, year/month HTML,
-`search.html`, or `public/assets/`. Older files may remain on disk after an
+`search.html`, or `assets/`. Older files may remain in the data root after an
 upgrade but are ignored. Remove them manually when convenient:
 
 ```sh
-find public -type f -name index.html -delete
-rm -f public/search.html
-rm -rf public/assets
+find data -type f -name index.html -delete
+rm -f data/search.html
+rm -rf data/assets
 ```
 
-Keep `public/catalog/` and `public/thumbs/`; those are the runtime data.
+Keep `data/catalog/` and `data/thumbs/`; those are the runtime data.
 
 ## Supervision
 

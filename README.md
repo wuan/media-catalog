@@ -45,27 +45,33 @@ Run the generator:
 ```sh
 cargo run --release --bin media-catalog -- \
   --media-root ./media \
-  --catalog-root ./catalog \
+  --data-root ./data \
+  --state-root ./state \
   --jobs 4
 ```
 
-The catalog root owns published catalog data and build metadata:
+The three roots each own one concern:
 
 ```text
-catalog/
-  public/
-    catalog/index.json     catalog commit point
-    catalog/YYYY.json      per-year item shards
-    thumbs/...             generated thumbnails
-  state.sqlite             build state
-  build.lock               concurrent-run guard
+media/
+  2023/12/IMG_0001.jpg
+  2024/05/event/clip.mp4
+
+data/
+  catalog/index.json     catalog commit point
+  catalog/YYYY.json      per-year item shards
+  thumbs/...             generated thumbnails
+
+state/
+  state.sqlite           build state
+  build.lock             concurrent-run guard
 ```
 
 No HTML pages or browser assets are written. Start the server:
 
 ```sh
 cargo run --release --bin media-catalog-server -- \
-  --catalog-root ./catalog \
+  --data-root ./data \
   --media-root ./media
 ```
 
@@ -91,7 +97,8 @@ reads `./media-catalog.toml` when that file exists.
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--media-root <path>` | required | Root of the read-only `YYYY/MM` archive. |
-| `--catalog-root <path>` | required | Root for `public/`, `state.sqlite`, and `build.lock`. |
+| `--data-root <path>` | required | Root for published `catalog/` and `thumbs/`. |
+| `--state-root <path>` | required | Root for `state.sqlite` and `build.lock`. |
 | `--media-url-prefix <path>` | `/media` | URL prefix for original media links. |
 | `--thumb-url-prefix <path>` | `/thumbs` | URL prefix for thumbnail links. |
 | `--jobs <n>` | `min(4, CPU cores)` | Parallel thumbnail/probe workers. |
@@ -106,17 +113,18 @@ Example `media-catalog.toml`:
 
 ```toml
 media_root = "/mnt/nas/media"
-catalog_root = "./catalog"
+data_root = "./data"
+state_root = "./state"
 media_url_prefix = "/media"
 thumb_url_prefix = "/thumbs"
 jobs = 4
 ```
 
-URL prefixes are normalized to a leading slash and no trailing slash. The public
-root is always `<catalog-root>/public`, and build state lives directly in the
-catalog root outside the published tree.
+URL prefixes are normalized to a leading slash and no trailing slash. Published
+data is written directly under the data root, and build state lives in the state
+root outside the published tree.
 
-The server accepts `--catalog-root`, `--media-root`, `--bind`, and
+The server accepts `--data-root`, `--media-root`, `--bind`, and
 `--max-streams`. The access token is read from `MEDIA_CATALOG_TOKEN`, never from
 the command line.
 
@@ -128,9 +136,9 @@ thumbnail generation show a live bar on a terminal; when stderr is redirected to
 a file or cron log, they log a counter at roughly ten-percent intervals instead.
 Use `--quiet` to suppress all progress output.
 
-The state database and the `build.lock` file sit beside each other in the
-catalog root. The lock is held for the whole run; a second build exits with a
-clear message and writes nothing.
+The state database and the `build.lock` file sit beside each other in the state
+root. The lock is held for the whole run; a second build exits with a clear
+message and writes nothing.
 
 ## Supported formats
 
@@ -201,7 +209,7 @@ them with an immutable cache policy.
 ## Published output
 
 ```text
-public/
+data/
   catalog/index.json
   catalog/YYYY.json
   thumbs/...
@@ -244,7 +252,7 @@ are immutable; originals use `private, no-cache`.
 
 The generator and server have separate readiness:
 
-- The server requires the media root and starts without `public/` or catalog JSON.
+- The server requires the media root and starts without a published catalog.
 - `/`, `/search.html`, and `/assets/*` remain available before publication.
 - `/` shows a bootstrap page stating that the catalog is not available yet.
 - `/{year}/` and `/{year}/{month}/` return `503` before publication and `404` for
@@ -320,7 +328,7 @@ On each run:
 3. Thumbnail only new/changed items, retries, missing files, and `--force` work.
 4. Publish JSON shards, then `catalog/index.json`, then remove stale shards.
 5. Remove state rows for deleted items (unless blocked by the mount guard).
-6. Optionally prune orphan thumbnails under `public/thumbs/`.
+6. Optionally prune orphan thumbnails under `<data-root>/thumbs/`.
 
 Unchanged sources are not reopened for probing or thumbnailing. An interrupted
 build leaves completed thumbnails recorded and in place; rerunning resumes the
@@ -329,9 +337,9 @@ therefore from server-rendered pages immediately.
 
 ### Prune safety and mount drops
 
-Pruning is opt-in with `--prune` and is confined to `public/thumbs/`. It removes
-files that do not belong to any current catalog item and cleans up empty
-directories; no file outside the thumbnail tree is touched.
+Pruning is opt-in with `--prune` and is confined to the thumbnail tree in the
+data root. It removes files that do not belong to any current catalog item and
+cleans up empty directories; no file outside the thumbnail tree is touched.
 
 To protect against a stale or missing NAS mount, a run warns when the current
 item count is less than half of the previous count (once the archive has at least
@@ -350,7 +358,7 @@ cargo build --release --bin media-catalog-server
 
 export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
 ./target/release/media-catalog-server \
-  --catalog-root "$HOME/.media-catalog" \
+  --data-root "$HOME/.media-catalog/data" \
   --media-root /Volumes/media/photos \
   --bind 127.0.0.1:8080
 ```
@@ -359,38 +367,59 @@ It streams `/media/` with byte ranges and conditional requests, serves catalog
 pages from JSON, and exposes `/healthz`. It binds to loopback by default, reads
 the access token from `MEDIA_CATALOG_TOKEN`, and never writes to either root.
 
-Keep `public/` and `state.sqlite` on local disk; SQLite WAL is not supported on
-network filesystems. The media root can stay on the NAS. Systemd and launchd
+Keep the data root and the state root on local disk; SQLite WAL is not supported
+on network filesystems. The media root can stay on the NAS. Systemd and launchd
 examples live in [`docs/server.md`](docs/server.md).
 
 A TLS-terminating reverse proxy may sit in front of the server; it must pass
 `Authorization`, `Range`, and `If-Range` and avoid buffering `/media/`. The
 server itself speaks plain HTTP.
 
-### Upgrading from the static web tree
+### Upgrading from the catalog-root layout
 
-Older builds may have left these obsolete files in `public/`:
-
-```text
-public/index.html
-public/YYYY/index.html
-public/YYYY/MM/index.html
-public/search.html
-public/assets/
-```
-
-The new server ignores them and renders pages and assets itself. They are not
-needed and can be removed manually after upgrading:
+Older deployments used `--catalog-root` with a `public/` wrapper. The binaries no
+longer accept `--catalog-root`, and neither binary falls back to a legacy
+`public/` subtree. Move the published tree and the build state into their own
+roots:
 
 ```sh
-find public -type f -name index.html -delete
-rm -f public/search.html
-rm -rf public/assets
+mv catalog/public data
+mkdir -p state
+mv catalog/state.sqlite catalog/build.lock state/
 ```
 
-Do not remove `public/catalog/` or `public/thumbs/`. Keeping the previous binary
-and generator is a straightforward rollback; the JSON/thumbnail tree stays
-compatible.
+Then update commands and configuration:
+
+```sh
+media-catalog        --media-root ./media --data-root ./data --state-root ./state
+media-catalog-server --media-root ./media --data-root ./data
+```
+
+In TOML, replace `catalog_root = "./catalog"` with `data_root = "./data"` and
+`state_root = "./state"`.
+
+Older builds may also have left obsolete static files inside the moved tree:
+
+```text
+data/index.html
+data/YYYY/index.html
+data/YYYY/MM/index.html
+data/search.html
+data/assets/
+```
+
+The server ignores them and renders pages and assets itself. Remove them when
+convenient:
+
+```sh
+find data -type f -name index.html -delete
+rm -f data/search.html
+rm -rf data/assets
+```
+
+Do not remove `data/catalog/` or `data/thumbs/`; those are the runtime data.
+Rollback requires the previous binary and moving the directories back. The JSON
+and thumbnail contents themselves are unchanged.
 
 ### Initial build
 

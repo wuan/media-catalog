@@ -7,7 +7,8 @@ Defines how the generator produces cacheable thumbnails for every catalog item, 
 ## Requirements
 
 ### Requirement: Generate a single thumbnail size
-The generator SHALL produce one 512x512 WebP thumbnail per catalog item using a center cover crop that preserves aspect ratio without distortion.
+
+The generator SHALL produce one 512x512 WebP thumbnail per catalog item under the configured data root using a center cover crop that preserves aspect ratio without distortion.
 
 #### Scenario: Landscape image
 - **WHEN** a 4032x3024 photo is processed
@@ -18,8 +19,8 @@ The generator SHALL produce one 512x512 WebP thumbnail per catalog item using a 
 - **THEN** its thumbnail is 512x512 WebP with the subject area center-cropped, not stretched
 
 #### Scenario: Thumbnail location
-- **WHEN** an item under `2024/05/` receives a thumbnail
-- **THEN** the file is written under `public/thumbs/2024/05/` with a unique name derived from the item
+- **WHEN** an item under `2024/05/` receives a thumbnail and the data root is `./data`
+- **THEN** the file is written under `./data/thumbs/2024/05/` with a unique name derived from the item
 
 ### Requirement: Respect source orientation
 The generator SHALL apply image EXIF orientation and video rotation metadata so thumbnails appear upright.
