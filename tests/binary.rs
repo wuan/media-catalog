@@ -85,11 +85,12 @@ fn failing_item_keeps_catalog_and_exits_nonzero() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Errors: 1"), "stdout was: {stdout}");
     assert!(stdout.contains("bad.jpg"));
-    assert!(fixture.public_path("index.html").exists());
+    assert!(fixture.public_path("catalog/index.json").exists());
     assert!(fixture.public_path("catalog/2024.json").exists());
     assert!(fixture
-        .read_html("2024/05/index.html")
-        .contains("class=\"placeholder\""));
+        .read_json("catalog/2024.json")
+        .contains("\"thumb_available\": false"));
+    assert!(!fixture.public_path("2024/05/index.html").exists());
 }
 
 #[test]
@@ -122,7 +123,10 @@ fn progress_is_reported_on_stderr_unless_quiet() {
         stderr.contains("Generating 1 thumbnails"),
         "stderr was: {stderr}"
     );
-    assert!(stderr.contains("Rendered"), "stderr was: {stderr}");
+    assert!(
+        stderr.contains("Publishing JSON catalog"),
+        "stderr was: {stderr}"
+    );
 
     let quiet = Command::new(binary())
         .args([
@@ -172,7 +176,7 @@ fn documented_command_builds_a_fixture() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Scanned: 1 items"));
     assert!(stdout.contains("Thumbnails: 1 generated"));
-    assert!(fixture.public_path("index.html").exists());
+    assert!(fixture.public_path("catalog/index.json").exists());
     assert!(fixture.public_path("catalog/2024.json").exists());
     assert!(fixture.thumb_path("2024/05/a.jpg").exists());
 }

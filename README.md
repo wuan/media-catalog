@@ -1,20 +1,13 @@
 # media-catalog
 
-Generate a fast, deployable static catalog for a photo/video archive laid out as
+Generate and serve a fast catalog for a photo/video archive laid out as
 `YYYY/MM`. The generator scans the archive read-only, extracts safe metadata,
-produces one WebP thumbnail per item, renders browsable HTML, and emits sharded
-JSON for client-side search. Build state lives in SQLite so reruns only process
-new or changed items.
+produces one WebP thumbnail per item, and publishes sharded JSON. The Rust server
+is the only runtime: it renders the browsable catalog pages from that JSON, serves
+the embedded search shell and assets, and streams originals from the media root.
 
-By default, the archive and the web tree are served by the same web server:
-
-- `/` → generated `public/` tree
-- `/media/` → read-only NAS mount (the originals)
-- `/thumbs/` → generated thumbnails inside `public/`
-
-When the web host cannot mount the NAS share, the optional
-`media-catalog-server` binary serves the generated tree and streams originals
-from a host that can read the media root. See [docs/server.md](docs/server.md).
+The catalog becomes usable as soon as `catalog/index.json` exists, even while
+thumbnails are still being generated.
 
 ## Requirements
 
@@ -32,7 +25,8 @@ cargo fmt --check
 cargo clippy -- -D warnings
 ```
 
-The release binary is `target/release/media-catalog`. `--help` lists every flag.
+The binaries are `target/release/media-catalog` (generator) and
+`target/release/media-catalog-server` (runtime). `--help` lists every flag.
 Performance measurements for a real-archive subset and a synthetic 75k-item tree
 are recorded in [`docs/performance.md`](docs/performance.md).
 
@@ -49,32 +43,50 @@ media/
 Run the generator:
 
 ```sh
-cargo run --release -- \
+cargo run --release --bin media-catalog -- \
   --media-root ./media \
   --catalog-root ./catalog \
   --jobs 4
 ```
 
-The catalog root owns the deployable tree and build metadata:
+The catalog root owns published catalog data and build metadata:
 
 ```text
 catalog/
-  public/                deployable web tree
-  state.sqlite           build state
-  build.lock             concurrent-run guard
+  public/
+    catalog/index.json     catalog commit point
+    catalog/YYYY.json      per-year item shards
+    thumbs/...             generated thumbnails
+  state.sqlite             build state
+  build.lock               concurrent-run guard
 ```
 
-The first run creates `public/`, thumbnails, HTML, and JSON. Later runs process
-only new or changed files:
+No HTML pages or browser assets are written. Start the server:
 
 ```sh
-cargo run --release -- --media-root ./media --catalog-root ./catalog --jobs 4
+cargo run --release --bin media-catalog-server -- \
+  --catalog-root ./catalog \
+  --media-root ./media
 ```
+
+It listens on `127.0.0.1:8080` by default:
+
+- `/` → root years page rendered from JSON
+- `/{year}/`, `/{year}/{month}/` → rendered year and month pages
+- `/search.html`, `/assets/*` → embedded search shell, CSS, and JavaScript
+- `/catalog/*` → published JSON
+- `/thumbs/*` → generated thumbnails
+- `/media/*` → read-only originals
+- `/healthz` → catalog and media readiness
+
+The server may start before any catalog exists. It serves the embedded shell and
+a bootstrap page at `/`, then picks up the published catalog without a restart.
+Later generator runs process only new or changed files.
 
 ## Configuration
 
-CLI flags override an optional TOML file. If `--config` is omitted, the
-generator reads `./media-catalog.toml` when that file exists.
+CLI flags override an optional TOML file. If `--config` is omitted, the generator
+reads `./media-catalog.toml` when that file exists.
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -102,7 +114,11 @@ jobs = 4
 
 URL prefixes are normalized to a leading slash and no trailing slash. The public
 root is always `<catalog-root>/public`, and build state lives directly in the
-catalog root, outside the deployable tree.
+catalog root outside the published tree.
+
+The server accepts `--catalog-root`, `--media-root`, `--bind`, and
+`--max-streams`. The access token is read from `MEDIA_CATALOG_TOKEN`, never from
+the command line.
 
 ## Progress output
 
@@ -151,8 +167,8 @@ present and otherwise the modification time. EXIF timestamps carry no timezone,
 so they are stored as naive local strings for deterministic, unambiguous sorting.
 
 GPS coordinates, camera make/model, and other private EXIF fields are never
-extracted or serialized into HTML or JSON. Thumbnails are re-encoded from pixels
-and therefore carry no source metadata.
+extracted or serialized into JSON or rendered pages. Thumbnails are re-encoded
+from pixels and therefore carry no source metadata.
 
 ## Thumbnails
 
@@ -179,20 +195,32 @@ Every item gets one 512×512 WebP thumbnail at quality 80:
 
 `--force` regenerates every thumbnail regardless of fingerprints.
 
-## Generated web tree
+Versioned thumbnail URLs are safe to cache for a long time. The server serves
+them with an immutable cache policy.
+
+## Published output
 
 ```text
 public/
-  index.html              root years page
-  YYYY/index.html         months for one year
-  YYYY/MM/index.html      item grid for one month
-  search.html             client-side search and filters
-  assets/site.css
-  assets/search.js
   catalog/index.json
   catalog/YYYY.json
   thumbs/...
 ```
+
+`catalog/index.json` is the commit point. The generator writes every referenced
+year shard first, replaces the index last, and then removes stale shards. An
+interrupted publication therefore leaves the previous complete catalog in place.
+
+The server keeps an immutable in-memory snapshot loaded from the index and its
+shards. It checks the index metadata on each catalog request and reloads when it
+changes. A reload that cannot read every referenced shard is discarded, so the
+previous snapshot keeps serving and visitors never see a partial catalog.
+
+Catalog pages are rendered per request with Askama:
+
+- root years index at `/`
+- months for a year at `/{year}/`
+- lazy-loaded item grid at `/{year}/{month}/`
 
 Month grids render every item with:
 
@@ -202,10 +230,30 @@ Month grids render every item with:
 - a direct link to the original under `/media/`
 - a neutral placeholder when no thumbnail exists
 
-Pages render without JavaScript. All navigation is root-relative and all
+Pages work without JavaScript. All navigation is root-relative and all
 thumbnail/media URLs are root-relative and percent-encoded per path segment
 (spaces, Unicode, `#`, `%`). Askama escapes filenames and metadata, and every
 thumbnail has non-empty alternative text. No per-item HTML pages are emitted.
+
+Rendered pages carry an ETag derived from the catalog snapshot and the route, so
+a matching `If-None-Match` returns `304`. Embedded shell assets carry a content
+validator. Catalog JSON and pages revalidate (`no-cache`); versioned thumbnails
+are immutable; originals use `private, no-cache`.
+
+## Missing catalog and readiness
+
+The generator and server have separate readiness:
+
+- The server requires the media root and starts without `public/` or catalog JSON.
+- `/`, `/search.html`, and `/assets/*` remain available before publication.
+- `/` shows a bootstrap page stating that the catalog is not available yet.
+- `/{year}/` and `/{year}/{month}/` return `503` before publication and `404` for
+  unknown years or months.
+- `/catalog/*` returns `404` until JSON exists.
+- `/healthz` reports catalog readiness separately from media readiness.
+
+When the generator publishes catalog JSON, pages and search data become available
+without restarting the server.
 
 ## JSON catalog and search
 
@@ -249,14 +297,16 @@ Each `catalog/YYYY.json` shard contains ordered item records:
 }
 ```
 
-Search (`search.html` + `assets/search.js`) loads the index and all year shards
-in parallel, then filters by text, type (`image`/`video`), year, and month. Filters
-are reflected in the URL query (`q`, `kind`, `year`, `month`) for shareable links
-and restored on page load. Without JavaScript, the page explains the limitation
-and links to the browsable year hierarchy.
+Search (`search.html` + `assets/search.js`, both embedded in the server binary)
+loads the index and all year shards in parallel, then filters by text, type
+(`image`/`video`), year, and month. Filters are reflected in the URL query
+(`q`, `kind`, `year`, `month`) for shareable links and restored on page load.
+Without JavaScript, the page explains the limitation and links to the browsable
+year hierarchy. If catalog JSON cannot be loaded yet, the search page shows a
+clear catalog-unavailable message.
 
-HTML and JSON contain no build timestamps, so two runs over an unchanged archive
-produce byte-identical output.
+JSON and rendered pages contain no build timestamps, so two runs over an
+unchanged archive produce byte-identical output.
 
 ## Incremental builds, resume, and cleanup
 
@@ -268,14 +318,14 @@ On each run:
 1. Scan the media tree and diff fingerprints.
 2. Probe only new/changed items, plus unchanged rows missing cached metadata.
 3. Thumbnail only new/changed items, retries, missing files, and `--force` work.
-4. Regenerate all HTML and JSON from the current catalog.
+4. Publish JSON shards, then `catalog/index.json`, then remove stale shards.
 5. Remove state rows for deleted items (unless blocked by the mount guard).
 6. Optionally prune orphan thumbnails under `public/thumbs/`.
 
 Unchanged sources are not reopened for probing or thumbnailing. An interrupted
 build leaves completed thumbnails recorded and in place; rerunning resumes the
-unfinished work and retries failed items. Deleted items disappear from pages and
-JSON immediately.
+unfinished work and retries failed items. Deleted items disappear from JSON and
+therefore from server-rendered pages immediately.
 
 ### Prune safety and mount drops
 
@@ -285,49 +335,15 @@ directories; no file outside the thumbnail tree is touched.
 
 To protect against a stale or missing NAS mount, a run warns when the current
 item count is less than half of the previous count (once the archive has at least
-four rows). In that case the build skips prune and state cleanup, still renders
-the current view, and exits nonzero. Confirm real deletions with
+four rows). In that case the build skips prune and state cleanup, publishes the
+current JSON view, and exits nonzero. Confirm real deletions with
 `--allow-mount-drop` before pruning and state cleanup proceed.
 
 ## Deployment
 
-### Web server (nginx)
-
-Serve the generated tree at `/` and the NAS originals read-only at `/media/`:
-
-```nginx
-server {
-    listen 80;
-    server_name media.example.lan;
-    root /srv/media-catalog/public;
-
-    location /media/ {
-        alias /mnt/nas/media/;
-        autoindex off;
-    }
-
-    location /thumbs/ {
-        # Thumbnail URLs carry ?v=<fingerprint>, so long-lived immutable caching is safe.
-        add_header Cache-Control "public, max-age=2592000, immutable";
-        try_files $uri =404;
-    }
-
-    location ~* \.html$ {
-        add_header Cache-Control "no-cache";
-    }
-
-    location /catalog/ {
-        add_header Cache-Control "no-cache";
-    }
-}
-```
-
-HTML and JSON should revalidate; versioned thumbnails can be cached for a long
-time because a changed source changes the URL.
-
-### Runtime server (Rust)
-
-If nginx cannot alias the NAS mount, build and run the optional server instead:
+The Rust server is the only supported runtime. Static-file deployment through
+nginx or an rsync/snapshot workflow is no longer supported because catalog pages
+and shell assets are rendered or embedded by the server.
 
 ```sh
 cargo build --release --bin media-catalog-server
@@ -339,24 +355,42 @@ export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
   --bind 127.0.0.1:8080
 ```
 
-It serves the catalog at `/`, streams `/media/` with byte ranges and conditional
-requests, and exposes `/healthz`. It binds to loopback by default, reads the
-access token from `MEDIA_CATALOG_TOKEN`, and never writes to either root.
+It streams `/media/` with byte ranges and conditional requests, serves catalog
+pages from JSON, and exposes `/healthz`. It binds to loopback by default, reads
+the access token from `MEDIA_CATALOG_TOKEN`, and never writes to either root.
 
 Keep `public/` and `state.sqlite` on local disk; SQLite WAL is not supported on
-network filesystems. The media root can stay on the NAS. A media-gateway and
-reverse-proxy topology, systemd/launchd examples, TLS guidance, and the
-browser-playback matrix are documented in [docs/server.md](docs/server.md).
+network filesystems. The media root can stay on the NAS. Systemd and launchd
+examples live in [`docs/server.md`](docs/server.md).
 
-### Snapshot or rsync deployment
+A TLS-terminating reverse proxy may sit in front of the server; it must pass
+`Authorization`, `Range`, and `If-Range` and avoid buffering `/media/`. The
+server itself speaks plain HTTP.
 
-Keep the previous `public/` snapshot for rollback. Deploy changes with:
+### Upgrading from the static web tree
 
-```sh
-rsync -a --delete public/ media@web:/srv/media-catalog/public/
+Older builds may have left these obsolete files in `public/`:
+
+```text
+public/index.html
+public/YYYY/index.html
+public/YYYY/MM/index.html
+public/search.html
+public/assets/
 ```
 
-`--delete` removes stale pages, shards, and pruned thumbnails on the server.
+The new server ignores them and renders pages and assets itself. They are not
+needed and can be removed manually after upgrading:
+
+```sh
+find public -type f -name index.html -delete
+rm -f public/search.html
+rm -rf public/assets
+```
+
+Do not remove `public/catalog/` or `public/thumbs/`. Keeping the previous binary
+and generator is a straightforward rollback; the JSON/thumbnail tree stays
+compatible.
 
 ### Initial build
 
@@ -369,6 +403,6 @@ process only new or changed files and are much faster.
 ## Run summary and exit status
 
 The summary reports scanned counts, new/changed/unchanged items, probes,
-thumbnails generated/skipped/failed/unsupported, pages and JSON written, deleted
+thumbnails generated/skipped/failed/unsupported, JSON files written, deleted
 rows, pruned files, per-item errors, and elapsed time. Exit status is nonzero for
 configuration errors, any per-item failure, or a blocked mount-drop guard.

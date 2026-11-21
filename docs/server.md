@@ -1,8 +1,9 @@
 # Runtime server
 
-`media-catalog-server` is a small read-only HTTP service that serves the generated
-`public/` tree and streams originals from a media root. It exists for deployments
-where a web server cannot mount the media share directly.
+`media-catalog-server` is the runtime for a generated catalog. It renders catalog
+pages from published JSON, serves the embedded search shell and browser assets,
+serves catalog JSON and thumbnails, and streams originals from a read-only media
+root. It does not require a pre-generated HTML tree.
 
 ## Topology
 
@@ -14,19 +15,20 @@ Browser
    v
 +--------------------------------------------------+
 | media-catalog-server                             |
-|  /                  -> public/                   |
-|  /assets, /catalog  -> public/                   |
+|  /                  -> render years from JSON    |
+|  /YYYY/             -> render months from JSON   |
+|  /YYYY/MM/          -> render item grid          |
+|  /search.html       -> embedded shell            |
+|  /assets/*          -> embedded CSS/JS           |
+|  /catalog/*         -> published JSON            |
 |  /thumbs/*          -> public/thumbs/*           |
 |  /media/*           -> media_root/*              |
-|  /healthz           -> readiness                 |
+|  /healthz           -> catalog/media readiness   |
 +--------------------------+-----------------------+
                            | read-only
                            v
                     media mount (SMB/NFS/local)
 ```
-
-If the frontend host cannot mount the share, run the server as a media gateway on
-a host that can, and reverse-proxy `/media/` to it.
 
 Keep `public/` and `state.sqlite` on local disk. SQLite WAL is not supported on
 network filesystems, and even rollback-journal mode is unreliable over SMB. Only
@@ -44,9 +46,11 @@ export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
   --bind 127.0.0.1:8080
 ```
 
-The catalog root must contain `public/`. The service binds to loopback by
-default. Add `--bind 0.0.0.0:8080` or a Tailscale address only when you intend
-to expose it.
+The catalog root may not contain `public/` yet. The service starts anyway, serves
+the shell and a bootstrap page, and begins rendering catalog pages when the
+generator publishes `catalog/index.json`. The media root remains required because
+`/media/` depends on it. The service binds to loopback by default. Add
+`--bind 0.0.0.0:8080` or a Tailscale address only when you intend to expose it.
 
 The access token is read from `MEDIA_CATALOG_TOKEN`, never from the command line.
 If the variable is unset or empty, access control is disabled.
@@ -60,61 +64,69 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 
 | Route | Behavior |
 | --- | --- |
-| `/` | generated `index.html` |
-| `/{year}/`, `/{year}/{month}/` | generated pages, no directory listings |
-| `/assets/*`, `/catalog/*`, `/thumbs/*` | generated static files |
+| `/` | rendered years index from JSON; bootstrap page before publication |
+| `/{year}/`, `/{year}/{month}/` | rendered pages; `404` for unknown years/months; `503` before publication |
+| `/search.html` | embedded search shell, available without a catalog |
+| `/assets/site.css`, `/assets/search.js` | embedded assets, available without a catalog |
+| `/catalog/*` | published JSON from `public/catalog/`; `404` before publication |
+| `/thumbs/*` | generated thumbnails from `public/thumbs/` |
 | `/media/*` | read-only original stream |
-| `/healthz` | `200` when catalog and media roots are available, otherwise `503` |
+| `/healthz` | `200` when catalog and media are ready, otherwise `503` with a detail line |
 
-- `HEAD` returns headers without a body.
+- Dynamic routes accept only numeric four-digit years and two-digit months, and
+  are registered before the static fallback. Unknown/invalid segments return
+  `404`, never a directory listing.
+- `HEAD` returns headers without a body for catalog pages and embedded assets.
 - `Range: bytes=start-end`, `bytes=start-`, and `bytes=-suffix` return `206` with
   `Content-Range`; unsatisfiable ranges return `416`.
 - Originals return strong `ETag`/`Last-Modified` and honor `If-None-Match` and
   `If-Modified-Since` with `304`.
-- Versioned thumbnails are served with an immutable cache policy; HTML/JSON
-  revalidate; originals use `private, no-cache`.
+- Rendered pages carry an ETag derived from the catalog snapshot and route;
+  embedded assets carry a content hash. A matching `If-None-Match` returns `304`.
+- Catalog JSON and rendered pages use `no-cache`; embedded assets revalidate;
+  versioned thumbnails use `public, max-age=2592000, immutable`; originals use
+  `private, no-cache`.
 - Path traversal, encoded traversal, NUL, backslash, and symlink escape are
   rejected.
-- If the media root disappears, `/media/` returns `503`, not a misleading `404`.
+- If the media root disappears, `/media/` returns `503`; catalog pages remain
+  servable.
 - The service never writes to the catalog or media roots and never lists
   directories.
 
-## Reverse proxy or media gateway
+## Catalog snapshot reload
 
-If nginx stays in front and only `/media/` needs the gateway:
+The server builds an immutable in-memory snapshot from `catalog/index.json` and
+every shard it references. On each catalog request it checks the index metadata:
 
-```nginx
-server {
-    listen 80;
-    server_name media.example.lan;
-    root /srv/media-catalog/public;
+- unchanged index → keep using the snapshot
+- changed index → load the index and all referenced shards, then swap in the new
+  snapshot
+- missing or unreadable shard → keep the previous snapshot and log the reload
+  failure
 
-    location /media/ {
-        proxy_pass http://127.0.0.1:8080/media/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Range $http_range;
-        proxy_set_header If-Range $http_if_range;
-        proxy_buffering off;
-        proxy_request_buffering off;
-    }
+Publication order makes this safe: the generator writes shards first and
+`catalog/index.json` last. A visitor therefore never observes a partially
+published catalog, and a running server picks up a completed update without a
+restart.
 
-    location /thumbs/ {
-        add_header Cache-Control "public, max-age=2592000, immutable";
-        try_files $uri =404;
-    }
+Before any catalog exists, `/` serves an embedded bootstrap page explaining that
+the catalog is not yet available. `/healthz` reports catalog readiness separately
+from media readiness so an operator can distinguish a missing build from a
+missing mount.
 
-    location ~* \.html$ {
-        add_header Cache-Control "no-cache";
-    }
+## Migrating from the static tree
 
-    location /catalog/ {
-        add_header Cache-Control "no-cache";
-    }
-}
+The server no longer serves pre-generated `index.html`, year/month HTML,
+`search.html`, or `public/assets/`. Older files may remain on disk after an
+upgrade but are ignored. Remove them manually when convenient:
+
+```sh
+find public -type f -name index.html -delete
+rm -f public/search.html
+rm -rf public/assets
 ```
 
-Alternatively, proxy `/` as well and let the Rust service serve the whole tree.
+Keep `public/catalog/` and `public/thumbs/`; those are the runtime data.
 
 ## Supervision
 
@@ -141,8 +153,9 @@ contains a token, or use `launchctl setenv MEDIA_CATALOG_TOKEN ...` instead.
 
 - Keep the default loopback bind unless LAN access is intended.
 - Restrict the listening port to trusted networks with the host firewall.
-- Prefer a reverse proxy (nginx/Caddy) for TLS. The server itself speaks plain
-  HTTP in this change.
+- Prefer a TLS-terminating reverse proxy for remote access. It must pass
+  `Authorization`, `Range`, and `If-Range`, and must not buffer `/media/`.
+- The server itself speaks plain HTTP.
 - Use the bearer token if the service is reachable by more than one trusted
   user, and do not log request headers.
 
@@ -163,8 +176,16 @@ ffmpeg, a job queue, and cached output.
 ## Verification
 
 ```sh
-# static catalog
+# rendered catalog pages
 curl -i http://127.0.0.1:8080/
+curl -i http://127.0.0.1:8080/2024/
+curl -i http://127.0.0.1:8080/2024/05/
+
+# embedded shell and assets
+curl -i http://127.0.0.1:8080/search.html
+curl -i http://127.0.0.1:8080/assets/search.js
+
+# JSON
 curl -i http://127.0.0.1:8080/catalog/index.json
 
 # media headers, HEAD, and range
@@ -172,11 +193,11 @@ curl -I http://127.0.0.1:8080/media/2024/05/clip.mp4
 curl -i -H 'Range: bytes=1000-1999' \
   http://127.0.0.1:8080/media/2024/05/clip.mp4
 
-# conditional request
-etag=$(curl -sI http://127.0.0.1:8080/catalog/index.json \
+# rendered-page conditional request
+etag=$(curl -sI http://127.0.0.1:8080/2024/05/ \
   | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
 curl -i -H "If-None-Match: $etag" \
-  http://127.0.0.1:8080/catalog/index.json
+  http://127.0.0.1:8080/2024/05/
 
 # traversal must be rejected
 curl -i --path-as-is http://127.0.0.1:8080/media/../etc/passwd

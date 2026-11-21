@@ -5,9 +5,16 @@ use std::time::Duration;
 
 use common::{set_readable, Fixture};
 use media_catalog::lock::BuildLock;
-use media_catalog::run_with_config;
 use media_catalog::state::StateDb;
+use media_catalog::{json, render, run_with_config};
 use serde_json::Value;
+
+fn rendered_month(fixture: &Fixture, year: i32, month: u32) -> String {
+    let catalog = json::load_catalog(&fixture.public.join("catalog")).unwrap();
+    render::render_month(&catalog, year, month)
+        .unwrap()
+        .expect("month page")
+}
 
 #[test]
 fn first_run_builds_output_and_second_run_is_idempotent() {
@@ -29,17 +36,24 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
     assert_eq!(first.summary.unchanged, 0);
     assert_eq!(first.summary.thumbnails_generated, 3);
     assert_eq!(first.summary.thumbnails_skipped, 0);
-    assert_eq!(first.summary.pages_written, 5); // index, year, two months, search
+    assert_eq!(first.summary.json_files_written, 2); // index plus one year shard
 
-    assert!(fixture.public_path("index.html").exists());
-    assert!(fixture.public_path("2024/index.html").exists());
-    assert!(fixture.public_path("2024/05/index.html").exists());
-    assert!(fixture.public_path("2024/06/index.html").exists());
-    assert!(fixture.public_path("search.html").exists());
-    assert!(fixture.public_path("assets/site.css").exists());
-    assert!(fixture.public_path("assets/search.js").exists());
     assert!(fixture.public_path("catalog/index.json").exists());
     assert!(fixture.public_path("catalog/2024.json").exists());
+    for obsolete in [
+        "index.html",
+        "2024/index.html",
+        "2024/05/index.html",
+        "2024/06/index.html",
+        "search.html",
+        "assets/site.css",
+        "assets/search.js",
+    ] {
+        assert!(
+            !fixture.public_path(obsolete).exists(),
+            "generator wrote obsolete {obsolete}"
+        );
+    }
 
     for rel in ["2024/05/a.jpg", "2024/05/b.jpg", "2024/06/c.jpg"] {
         let thumb = fixture.thumb_path(rel);
@@ -51,7 +65,7 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
 
     let index_before = fixture.read_json("catalog/index.json");
     let shard_before = fixture.read_json("catalog/2024.json");
-    let month_before = fixture.read_html("2024/05/index.html");
+    let month_before = rendered_month(&fixture, 2024, 5);
     let thumbs_before: Vec<_> = ["2024/05/a.jpg", "2024/05/b.jpg", "2024/06/c.jpg"]
         .into_iter()
         .map(|rel| fixture.thumb_mtime(rel))
@@ -68,7 +82,7 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
 
     assert_eq!(fixture.read_json("catalog/index.json"), index_before);
     assert_eq!(fixture.read_json("catalog/2024.json"), shard_before);
-    assert_eq!(fixture.read_html("2024/05/index.html"), month_before);
+    assert_eq!(rendered_month(&fixture, 2024, 5), month_before);
     let thumbs_after: Vec<_> = ["2024/05/a.jpg", "2024/05/b.jpg", "2024/06/c.jpg"]
         .into_iter()
         .map(|rel| fixture.thumb_mtime(rel))
@@ -143,9 +157,7 @@ fn deleted_items_disappear_and_prune_is_opt_in() {
     assert!(!fixture
         .read_json("catalog/2024.json")
         .contains("2024/05/b.jpg"));
-    assert!(!fixture
-        .read_html("2024/05/index.html")
-        .contains("2024/05/b.jpg"));
+    assert!(!rendered_month(&fixture, 2024, 5).contains("2024/05/b.jpg"));
     assert!(fixture.thumb_path("2024/05/b.jpg").exists());
 
     let mut prune_config = fixture.config();
@@ -155,8 +167,7 @@ fn deleted_items_disappear_and_prune_is_opt_in() {
     assert!(!fixture.thumb_path("2024/05/b.jpg").exists());
     assert!(fixture.thumb_path("2024/05/a.jpg").exists());
     assert!(fixture.thumb_path("2024/06/c.jpg").exists());
-    assert!(fixture.public_path("index.html").exists());
-    assert!(fixture.public_path("search.html").exists());
+    assert!(fixture.public_path("catalog/index.json").exists());
 }
 
 #[test]
@@ -178,7 +189,7 @@ fn mount_drop_blocks_cleanup_until_overridden() {
     assert!(blocked.summary.mount_warning.is_some());
     assert_eq!(blocked.summary.pruned, 0);
     assert_eq!(blocked.summary.deleted, 0);
-    assert_eq!(fixture.thumb_path("2024/05/5.jpg").exists(), true);
+    assert!(fixture.thumb_path("2024/05/5.jpg").exists());
     assert_eq!(
         StateDb::open(&fixture.state).unwrap().item_count().unwrap(),
         6
@@ -191,8 +202,8 @@ fn mount_drop_blocks_cleanup_until_overridden() {
     assert!(!overridden.blocked);
     assert_eq!(overridden.summary.pruned, 5);
     assert_eq!(overridden.summary.deleted, 5);
-    assert_eq!(fixture.thumb_path("2024/05/0.jpg").exists(), true);
-    assert_eq!(fixture.thumb_path("2024/05/5.jpg").exists(), false);
+    assert!(fixture.thumb_path("2024/05/0.jpg").exists());
+    assert!(!fixture.thumb_path("2024/05/5.jpg").exists());
     assert_eq!(
         StateDb::open(&fixture.state).unwrap().item_count().unwrap(),
         1
@@ -318,7 +329,7 @@ fn heic_is_unavailable_and_metadata_is_private() {
     assert!(shard.contains("2024-05-01 10:11:12"));
     assert!(shard.contains("\"thumb_available\": false"));
 
-    let html = fixture.read_html("2024/05/index.html");
+    let html = rendered_month(&fixture, 2024, 5);
     assert!(html.contains("phone.heic"));
     assert!(html.contains("class=\"placeholder\""));
 }
@@ -370,7 +381,7 @@ fn lock_blocks_a_concurrent_run_and_is_released() {
 
     drop(lock);
     run_with_config(fixture.config()).unwrap();
-    assert!(fixture.public_path("index.html").exists());
+    assert!(fixture.public_path("catalog/index.json").exists());
 }
 
 #[test]
@@ -433,10 +444,15 @@ fn prune_never_touches_files_outside_the_thumbnail_tree() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);
     run_with_config(fixture.config()).unwrap();
+    // Simulate obsolete files left in public/ after upgrading from the static
+    // tree; prune must stay confined to public/thumbs/.
+    std::fs::write(fixture.public_path("index.html"), "legacy").unwrap();
+    std::fs::write(fixture.public_path("search.html"), "legacy").unwrap();
     let outside = HashSet::from([
         fixture.public_path("index.html"),
         fixture.public_path("search.html"),
         fixture.public_path("catalog/index.json"),
+        fixture.public_path("catalog/2024.json"),
     ]);
 
     let mut config = fixture.config();

@@ -34,10 +34,11 @@ fn search_filters_narrow_the_loaded_shards() {
     );
 
     let script = format!("{}/tests/js/filter_check.mjs", env!("CARGO_MANIFEST_DIR"));
+    let asset = format!("{}/assets/search.js", env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("node")
         .args([
             script.as_str(),
-            fixture.public_path("assets/search.js").to_str().unwrap(),
+            asset.as_str(),
             fixture.public.to_str().unwrap(),
         ])
         .output()
@@ -65,10 +66,7 @@ fn search_filters_narrow_the_loaded_shards() {
 
 #[test]
 fn search_page_works_without_javascript_and_links_to_browse() {
-    let fixture = Fixture::new();
-    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
-    run_with_config(fixture.config()).unwrap();
-    let html = fixture.read_html("search.html");
+    let html = media_catalog::render::render_search_shell().unwrap();
     assert!(html.contains("<noscript>"));
     assert!(html.contains("browse the catalog by year"));
     assert!(html.contains("href=\"/\""));

@@ -193,7 +193,7 @@ fn tiff_with(orientation: Option<u16>, datetime: Option<&str>, gps: bool) -> Vec
         None
     };
 
-    let datetime_offset = if let Some(_) = exif_ifd_offset {
+    let datetime_offset = if exif_ifd_offset.is_some() {
         let offset = next_offset;
         next_offset += 20;
         Some(offset)

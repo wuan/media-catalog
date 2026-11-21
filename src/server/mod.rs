@@ -1,3 +1,5 @@
+pub mod assets;
+pub mod catalog;
 pub mod media;
 pub mod static_files;
 mod support;
@@ -21,6 +23,7 @@ use tokio::sync::Semaphore;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use catalog::CatalogStore;
 use support::{error_response, text_response};
 
 /// Runtime configuration for the read-only server.
@@ -47,24 +50,38 @@ impl ServerConfig {
         }
     }
 
-    /// Canonicalize and validate the roots before serving.
+    /// Canonicalize and validate the roots before serving. The catalog root may
+    /// be absent until the generator publishes a catalog; the media root is
+    /// required because `/media/` depends on it.
     pub fn validate(self) -> Result<Self> {
         if self.max_streams == 0 {
             bail!("--max-streams must be at least 1");
         }
 
-        let public_root = std::fs::canonicalize(&self.public_root).with_context(|| {
-            format!(
-                "catalog public root does not exist: {}",
-                self.public_root.display()
-            )
-        })?;
-        if !public_root.is_dir() {
-            bail!(
-                "catalog public root is not a directory: {}",
-                public_root.display()
-            );
-        }
+        let public_root = match std::fs::canonicalize(&self.public_root) {
+            Ok(path) => {
+                if !path.is_dir() {
+                    bail!("catalog public root is not a directory: {}", path.display());
+                }
+                path
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let absolute = if self.public_root.is_absolute() {
+                    self.public_root.clone()
+                } else {
+                    std::env::current_dir()
+                        .context("reading the current directory")?
+                        .join(&self.public_root)
+                };
+                crate::config::normalize_lexically(&absolute)
+            }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!(
+                    "resolving catalog public root {}",
+                    self.public_root.display()
+                )));
+            }
+        };
 
         let media_root = std::fs::canonicalize(&self.media_root)
             .with_context(|| format!("media root does not exist: {}", self.media_root.display()))?;
@@ -93,7 +110,7 @@ impl ServerConfig {
 #[command(
     name = "media-catalog-server",
     version,
-    about = "Serve the generated media catalog and read-only originals over HTTP"
+    about = "Render the published media catalog and serve read-only originals over HTTP"
 )]
 pub struct ServeCli {
     /// Catalog root containing the generated `public/` tree.
@@ -136,11 +153,13 @@ pub struct AppState {
     pub(crate) media_root: PathBuf,
     pub(crate) token: Option<Arc<str>>,
     pub(crate) media_streams: Arc<Semaphore>,
+    pub(crate) catalog: Arc<CatalogStore>,
 }
 
 impl AppState {
     fn from_config(config: ServerConfig) -> Self {
         Self {
+            catalog: Arc::new(CatalogStore::new(config.public_root.clone())),
             public_root: config.public_root,
             media_root: config.media_root,
             token: config.token.map(Arc::from),
@@ -174,8 +193,22 @@ pub fn router_from_state(state: AppState) -> Router {
     let nosniff = HeaderName::from_static("x-content-type-options");
     let router = Router::new()
         .route("/healthz", get(health))
+        .route("/", get(catalog::serve_root))
+        .route("/search.html", get(assets::serve_search_shell))
+        .route("/assets/site.css", get(assets::serve_site_css))
+        .route("/assets/search.js", get(assets::serve_search_js))
+        // Dynamic catalog routes accept numeric segments in the handlers and are
+        // registered before the static fallback.
+        .route("/{year}", get(catalog::serve_year))
+        .route("/{year}/", get(catalog::serve_year))
+        .route("/{year}/{month}", get(catalog::serve_month))
+        .route("/{year}/{month}/", get(catalog::serve_month))
+        .route("/catalog/{*path}", get(static_files::serve_static))
+        .route("/thumbs/{*path}", get(static_files::serve_static))
         .route("/media/{*path}", get(media::serve_media))
-        .fallback(static_files::serve_static)
+        // Everything else is not part of the runtime contract: obsolete static
+        // HTML and asset files left in public/ are not served.
+        .fallback(not_found)
         .with_state(state.clone());
 
     router
@@ -226,11 +259,21 @@ pub async fn serve_listener(
     Ok(())
 }
 
+async fn not_found() -> Response {
+    error_response(StatusCode::NOT_FOUND, "not found")
+}
+
 async fn health(State(state): State<AppState>) -> Response {
-    let catalog_ok = state.public_root.is_dir();
+    let catalog_ok = state.catalog.current().await.is_some();
     let media_ok = state.media_root.is_dir();
     if catalog_ok && media_ok {
         text_response(StatusCode::OK, "ok\n", "no-store")
+    } else if !catalog_ok && !media_ok {
+        text_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "catalog and media unavailable\n",
+            "no-store",
+        )
     } else if !catalog_ok {
         text_response(
             StatusCode::SERVICE_UNAVAILABLE,

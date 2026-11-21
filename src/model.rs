@@ -64,6 +64,19 @@ pub struct Catalog {
     pub item_count: usize,
 }
 
+impl Catalog {
+    pub fn year(&self, year: i32) -> Option<&YearView> {
+        self.years.iter().find(|view| view.year == year)
+    }
+
+    pub fn month(&self, year: i32, month: u32) -> Option<&MonthView> {
+        self.year(year)?
+            .months
+            .iter()
+            .find(|view| view.month == month)
+    }
+}
+
 /// Resolve a capture timestamp, falling back to the file modification time.
 pub fn capture_timestamp(captured_at: Option<String>, mtime_ns: i64) -> String {
     captured_at

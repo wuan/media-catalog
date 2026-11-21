@@ -54,16 +54,6 @@ pub fn thumb_abs_path(public_root: &Path, src_rel_path: &str) -> PathBuf {
     public_root.join(thumb_rel_path(src_rel_path))
 }
 
-/// Public-tree-relative path for a year page.
-pub fn year_page_rel(year: i32) -> String {
-    format!("{year}/index.html")
-}
-
-/// Public-tree-relative path for a month page.
-pub fn month_page_rel(year: i32, month: u32) -> String {
-    format!("{year}/{month:02}/index.html")
-}
-
 /// Root-relative navigation URL for a year page.
 pub fn year_page_url(year: i32) -> String {
     format!("/{year}/")

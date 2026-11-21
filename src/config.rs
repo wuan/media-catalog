@@ -10,7 +10,7 @@ use serde::Deserialize;
 #[command(
     name = "media-catalog",
     version,
-    about = "Generate a static, incremental catalog for a YYYY/MM media archive"
+    about = "Generate and publish an incremental catalog for a YYYY/MM media archive"
 )]
 pub struct Cli {
     /// Root of the read-only media archive (organized as YYYY/MM).

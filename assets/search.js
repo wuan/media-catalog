@@ -217,7 +217,8 @@
       })
       .catch(function (error) {
         document.getElementById("status").textContent =
-          "Could not load the catalog. Browse the catalog by year instead: " + error.message;
+          "The catalog is not available yet. Browse the catalog by year instead. (" +
+          error.message + ")";
       });
   }
 

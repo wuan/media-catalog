@@ -1,55 +1,56 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use serde::Serialize;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::fsutil::write_atomic;
-use crate::model::{Catalog, ItemView};
+use crate::model::{month_label, month_short_label, Catalog, ItemView, MonthView, YearView};
+use crate::paths::item_name;
 use crate::scan::MediaKind;
 
 pub const JSON_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Serialize)]
-struct IndexFile {
-    schema_version: u32,
-    total_items: usize,
-    years: Vec<IndexYear>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexFile {
+    pub schema_version: u32,
+    pub total_items: usize,
+    pub years: Vec<IndexYear>,
 }
 
-#[derive(Debug, Serialize)]
-struct IndexYear {
-    year: i32,
-    count: usize,
-    months: Vec<IndexMonth>,
-    shard: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexYear {
+    pub year: i32,
+    pub count: usize,
+    pub months: Vec<IndexMonth>,
+    pub shard: String,
 }
 
-#[derive(Debug, Serialize)]
-struct IndexMonth {
-    month: u32,
-    count: usize,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexMonth {
+    pub month: u32,
+    pub count: usize,
 }
 
-#[derive(Debug, Serialize)]
-struct YearShard {
-    schema_version: u32,
-    year: i32,
-    items: Vec<ShardItem>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YearShard {
+    pub schema_version: u32,
+    pub year: i32,
+    pub items: Vec<ShardItem>,
 }
 
-#[derive(Debug, Serialize)]
-struct ShardItem {
-    path: String,
-    month: u32,
-    kind: MediaKind,
-    captured_at: String,
-    width: Option<u32>,
-    height: Option<u32>,
-    duration_ms: Option<u64>,
-    thumb_url: Option<String>,
-    media_url: String,
-    thumb_available: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShardItem {
+    pub path: String,
+    pub month: u32,
+    pub kind: MediaKind,
+    pub captured_at: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub duration_ms: Option<u64>,
+    pub thumb_url: Option<String>,
+    pub media_url: String,
+    pub thumb_available: bool,
 }
 
 impl From<&ItemView> for ShardItem {
@@ -65,6 +66,24 @@ impl From<&ItemView> for ShardItem {
             thumb_url: item.thumb_url.clone(),
             media_url: item.media_url.clone(),
             thumb_available: item.thumb_available,
+        }
+    }
+}
+
+impl ShardItem {
+    pub fn to_item_view(&self) -> ItemView {
+        ItemView {
+            path: self.path.clone(),
+            name: item_name(&self.path),
+            month: self.month,
+            kind: self.kind,
+            captured_at: self.captured_at.clone(),
+            width: self.width,
+            height: self.height,
+            duration_ms: self.duration_ms,
+            thumb_url: self.thumb_url.clone(),
+            media_url: self.media_url.clone(),
+            thumb_available: self.thumb_available,
         }
     }
 }
@@ -94,7 +113,7 @@ pub fn render_json(catalog: &Catalog) -> Result<JsonOutput> {
             year: year.year,
             count: year.item_count,
             months,
-            shard: format!("catalog/{}.json", year.year),
+            shard: shard_path(year.year),
         });
 
         let items = year
@@ -126,25 +145,198 @@ fn to_pretty_json<T: Serialize>(value: &T) -> Result<String> {
     Ok(text)
 }
 
-/// Write `catalog/index.json` and one shard per year, removing stale shards for
-/// years that no longer exist.
+/// Index-relative shard path for a year.
+pub fn shard_path(year: i32) -> String {
+    format!("catalog/{year}.json")
+}
+
+/// Validate and normalize the shard path recorded in the index.
+pub fn shard_file_name(year: i32, shard: &str) -> Result<String> {
+    let expected = format!("{year}.json");
+    let expected_path = format!("catalog/{expected}");
+    if shard != expected_path {
+        bail!(
+            "catalog index for {year} references unsupported shard path {shard:?}; expected {expected_path:?}"
+        );
+    }
+    Ok(expected)
+}
+
+/// Parse an index document.
+pub fn parse_index(text: &str) -> Result<IndexFile> {
+    serde_json::from_str(text).context("parsing catalog index")
+}
+
+/// Parse a year shard document.
+pub fn parse_shard(text: &str) -> Result<YearShard> {
+    serde_json::from_str(text).context("parsing catalog shard")
+}
+
+/// Rebuild the shared catalog model from a parsed index and shards.
+pub fn catalog_from_parts(index: &IndexFile, shards: &BTreeMap<i32, YearShard>) -> Result<Catalog> {
+    if index.schema_version != JSON_SCHEMA_VERSION {
+        bail!(
+            "unsupported catalog schema version {} (expected {})",
+            index.schema_version,
+            JSON_SCHEMA_VERSION
+        );
+    }
+
+    let declared_total: usize = index.years.iter().map(|year| year.count).sum();
+    if declared_total != index.total_items {
+        bail!(
+            "catalog index total_items {} does not match year counts {}",
+            index.total_items,
+            declared_total
+        );
+    }
+
+    let mut years = Vec::with_capacity(index.years.len());
+    let mut total = 0usize;
+
+    for index_year in &index.years {
+        let shard = shards
+            .get(&index_year.year)
+            .with_context(|| format!("missing shard for year {}", index_year.year))?;
+        if shard.schema_version != JSON_SCHEMA_VERSION {
+            bail!(
+                "shard {} has unsupported schema version {}",
+                index_year.year,
+                shard.schema_version
+            );
+        }
+        if shard.year != index_year.year {
+            bail!("shard for {} declares year {}", index_year.year, shard.year);
+        }
+        if shard.items.len() != index_year.count {
+            bail!(
+                "shard {} has {} items but the index declares {}",
+                index_year.year,
+                shard.items.len(),
+                index_year.count
+            );
+        }
+
+        let mut months: Vec<MonthView> = Vec::new();
+        for item in &shard.items {
+            if !(1..=12).contains(&item.month) {
+                bail!(
+                    "shard {} item {:?} has invalid month {}",
+                    index_year.year,
+                    item.path,
+                    item.month
+                );
+            }
+            let view = item.to_item_view();
+            match months.last_mut() {
+                Some(month) if month.month == view.month => month.items.push(view),
+                _ => months.push(MonthView {
+                    year: index_year.year,
+                    month: view.month,
+                    label: month_label(index_year.year, view.month),
+                    short_label: month_short_label(index_year.year, view.month),
+                    items: vec![view],
+                }),
+            }
+        }
+
+        if months.len() != index_year.months.len() {
+            bail!(
+                "shard {} has {} month groups but the index declares {}",
+                index_year.year,
+                months.len(),
+                index_year.months.len()
+            );
+        }
+        for index_month in &index_year.months {
+            let actual = months
+                .iter()
+                .find(|month| month.month == index_month.month)
+                .map(|month| month.items.len())
+                .unwrap_or(0);
+            if actual != index_month.count {
+                bail!(
+                    "shard {} month {} has {} items but the index declares {}",
+                    index_year.year,
+                    index_month.month,
+                    actual,
+                    index_month.count
+                );
+            }
+        }
+
+        total += shard.items.len();
+        years.push(YearView {
+            year: index_year.year,
+            months,
+            item_count: shard.items.len(),
+        });
+    }
+
+    if total != index.total_items {
+        bail!(
+            "catalog shards contain {} items but the index declares {}",
+            total,
+            index.total_items
+        );
+    }
+
+    Ok(Catalog {
+        years,
+        item_count: total,
+    })
+}
+
+/// Parse an index plus shard documents into the shared catalog model.
+pub fn catalog_from_json(index_text: &str, shard_texts: &BTreeMap<i32, String>) -> Result<Catalog> {
+    let index = parse_index(index_text)?;
+    let mut shards = BTreeMap::new();
+    for index_year in &index.years {
+        let text = shard_texts
+            .get(&index_year.year)
+            .with_context(|| format!("missing shard text for year {}", index_year.year))?;
+        shards.insert(index_year.year, parse_shard(text)?);
+    }
+    catalog_from_parts(&index, &shards)
+}
+
+/// Read `catalog/index.json` and its referenced shards from a catalog directory.
+pub fn load_catalog(catalog_dir: &Path) -> Result<Catalog> {
+    let index_text = std::fs::read_to_string(catalog_dir.join("index.json"))
+        .with_context(|| format!("reading {}", catalog_dir.join("index.json").display()))?;
+    let index = parse_index(&index_text)?;
+
+    let mut shards = BTreeMap::new();
+    for index_year in &index.years {
+        let name = shard_file_name(index_year.year, &index_year.shard)?;
+        let path = catalog_dir.join(name);
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        shards.insert(index_year.year, parse_shard(&text)?);
+    }
+
+    catalog_from_parts(&index, &shards)
+}
+
+/// Write one shard per year first, then `catalog/index.json` as the commit
+/// point, then remove stale shards for years no longer referenced.
 pub fn write_json(public_root: &Path, catalog: &Catalog) -> Result<usize> {
     let output = render_json(catalog)?;
     let catalog_dir = public_root.join("catalog");
     let mut written = 0;
-
-    let index_path = catalog_dir.join("index.json");
-    write_atomic(&index_path, output.index.as_bytes())?;
-    written += 1;
-
     let mut expected = BTreeSet::new();
-    expected.insert(index_path);
+
     for (year, shard) in &output.shards {
         let path = catalog_dir.join(format!("{year}.json"));
         write_atomic(&path, shard.as_bytes())?;
         expected.insert(path);
         written += 1;
     }
+
+    let index_path = catalog_dir.join("index.json");
+    write_atomic(&index_path, output.index.as_bytes())?;
+    expected.insert(index_path);
+    written += 1;
 
     remove_stale_shards(&catalog_dir, &expected)?;
     Ok(written)
@@ -268,6 +460,40 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_json_into_the_shared_catalog_model() {
+        let original = catalog();
+        let output = render_json(&original).unwrap();
+        let parsed = catalog_from_json(&output.index, &output.shards).unwrap();
+        assert_eq!(parsed.item_count, original.item_count);
+        assert_eq!(parsed.years.len(), original.years.len());
+        for (left, right) in parsed.years.iter().zip(&original.years) {
+            assert_eq!(left.year, right.year);
+            assert_eq!(left.item_count, right.item_count);
+            assert_eq!(left.months.len(), right.months.len());
+            for (lmonth, rmonth) in left.months.iter().zip(&right.months) {
+                assert_eq!(lmonth.month, rmonth.month);
+                assert_eq!(lmonth.items, rmonth.items);
+            }
+        }
+
+        let rerendered = render_json(&parsed).unwrap();
+        assert_eq!(rerendered.index, output.index);
+        assert_eq!(rerendered.shards, output.shards);
+    }
+
+    #[test]
+    fn rejects_index_counts_that_disagree_with_shards() {
+        let output = render_json(&catalog()).unwrap();
+        let mut index: IndexFile = parse_index(&output.index).unwrap();
+        index.years[0].count += 1;
+        let mut shards = BTreeMap::new();
+        for year in &index.years {
+            shards.insert(year.year, parse_shard(&output.shards[&year.year]).unwrap());
+        }
+        assert!(catalog_from_parts(&index, &shards).is_err());
+    }
+
+    #[test]
     fn removes_stale_shards_for_vanished_years() {
         let temp = tempfile::tempdir().unwrap();
         let catalog_dir = temp.path().join("catalog");
@@ -277,5 +503,22 @@ mod tests {
         assert!(!catalog_dir.join("2019.json").exists());
         assert!(catalog_dir.join("2024.json").exists());
         assert!(catalog_dir.join("index.json").exists());
+    }
+
+    #[test]
+    fn writes_shards_before_the_index_and_keeps_the_old_index_on_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let catalog_dir = temp.path().join("catalog");
+        std::fs::create_dir_all(&catalog_dir).unwrap();
+        std::fs::write(catalog_dir.join("index.json"), "previous-index").unwrap();
+
+        // A directory at a shard destination makes that shard write fail.
+        std::fs::create_dir(catalog_dir.join("2024.json")).unwrap();
+        let error = write_json(temp.path(), &catalog()).unwrap_err();
+        assert!(error.to_string().contains("2024.json"));
+        assert_eq!(
+            std::fs::read_to_string(catalog_dir.join("index.json")).unwrap(),
+            "previous-index"
+        );
     }
 }

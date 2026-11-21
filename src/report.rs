@@ -24,7 +24,6 @@ pub struct RunSummary {
     pub thumbnails_unsupported: usize,
     pub deleted: usize,
     pub pruned: usize,
-    pub pages_written: usize,
     pub json_files_written: usize,
     pub errors: Vec<ItemFailure>,
     pub unsupported: Vec<String>,
@@ -62,10 +61,7 @@ impl RunSummary {
             self.thumbnails_unsupported
         ));
         if !self.dry_run {
-            lines.push(format!(
-                "Output: {} pages, {} JSON files",
-                self.pages_written, self.json_files_written
-            ));
+            lines.push(format!("Output: {} JSON files", self.json_files_written));
             if self.deleted > 0 {
                 lines.push(format!(
                     "Removed state rows for {} deleted items",
@@ -100,5 +96,26 @@ impl RunSummary {
         }
         lines.push(format!("Elapsed: {:.1}s", self.elapsed.as_secs_f64()));
         lines.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_reports_json_not_page_counts() {
+        let summary = RunSummary {
+            json_files_written: 3,
+            thumbnails_generated: 2,
+            deleted: 1,
+            pruned: 4,
+            ..RunSummary::default()
+        };
+        let rendered = summary.render();
+        assert!(rendered.contains("Output: 3 JSON files"));
+        assert!(rendered.contains("Removed state rows for 1 deleted items"));
+        assert!(rendered.contains("Pruned 4 orphan thumbnails"));
+        assert!(!rendered.to_ascii_lowercase().contains("pages"));
     }
 }

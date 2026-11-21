@@ -75,7 +75,7 @@ struct ThumbOutcome {
 /// Run the full pipeline with a resolved configuration.
 ///
 /// The order is: validate tools -> lock -> open state -> scan -> diff ->
-/// probe changed -> thumbnail changed -> render pages/JSON -> cleanup -> report.
+/// probe changed -> thumbnail changed -> publish JSON -> cleanup -> report.
 pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     config.validate()?;
     probe::ensure_external_tools().context("configuration error")?;
@@ -437,14 +437,12 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
 
     let catalog = model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
 
-    progress.phase("Rendering HTML pages");
-    let render_stats = render::render_all(&config.public_root, &catalog)?;
-    summary.pages_written = render_stats.pages;
-    progress.phase(format!("Rendered {} HTML pages", render_stats.pages));
-
-    progress.phase("Writing JSON catalog");
+    progress.phase("Publishing JSON catalog");
     summary.json_files_written = json::write_json(&config.public_root, &catalog)?;
-    progress.phase(format!("Wrote {} JSON files", summary.json_files_written));
+    progress.phase(format!(
+        "Published {} JSON files",
+        summary.json_files_written
+    ));
 
     if summary.blocked {
         summary.deleted = 0;

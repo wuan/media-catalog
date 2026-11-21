@@ -2,7 +2,7 @@
 name = "media-catalog"
 version = "0.1.0"
 edition = "2021"
-description = "Generate a static, incremental catalog for a YYYY/MM media archive"
+description = "Generate and serve an incremental catalog for a YYYY/MM media archive"
 license = "MIT"
 
 [dependencies]

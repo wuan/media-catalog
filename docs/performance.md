@@ -26,11 +26,11 @@ target/release/media-catalog \
 - Original checksums were identical before and after the build.
 - Generated JSON contained no GPS, latitude, longitude, camera, make, or model
   fields.
-- Thumbnail and media URLs resolved under `/thumbs/` and `/media/` when the tree
-  was served locally over HTTP (200 responses for HTML, JSON, assets, a poster
-  thumbnail, and an original video).
-- `rsync -a --delete` reproduced the public tree exactly and removed a stale
-  page mirrored from the source.
+- Thumbnail, media, and JSON URLs resolved under `/thumbs/`, `/media/`, and
+  `/catalog/` when served by `media-catalog-server`, and the dynamic index, year,
+  and month pages rendered from the published JSON (200 responses for pages,
+  JSON, embedded assets, a poster thumbnail, and an original video).
+- The running server picked up the published catalog without a restart.
 
 ## Synthetic 75k-item tree
 
@@ -42,7 +42,7 @@ with `--jobs 8`:
 | Initial | 75,000 | 75,000 probed and thumbnailed | 440.0 s | 250 MB |
 | Incremental (+100 new) | 75,100 | 100 probed/thumbnailed; 75,000 skipped | 2.7 s | 316 MB |
 
-Initial output was 352 MB of thumbnails plus HTML/JSON; the state database was
+Initial output was 352 MB of thumbnails plus JSON; the state database was
 17 MB. `--jobs` bounds decoding memory; the real subset used 6 workers to cap RSS
 while decoding 12-megapixel photos.
 
