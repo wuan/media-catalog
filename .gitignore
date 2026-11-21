@@ -3,3 +3,4 @@
 /.media-catalog/
 /media/
 *.snap.new
+.envrc
