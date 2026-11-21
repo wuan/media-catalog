@@ -288,11 +288,41 @@ impl StateDb {
 fn configure(conn: &Connection) -> Result<()> {
     conn.busy_timeout(Duration::from_secs(5))
         .context("setting SQLite busy timeout")?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .context("enabling SQLite WAL mode")?;
+    let journal_mode = enable_wal(conn)?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        eprintln!(
+            "warning: SQLite WAL mode is unavailable (journal_mode={journal_mode}); \
+             the state database is probably on a network filesystem. SQLite does not \
+             support WAL over network mounts; move state.sqlite to local storage."
+        );
+    }
     conn.pragma_update(None, "synchronous", "NORMAL")
         .context("setting SQLite synchronous mode")?;
     Ok(())
+}
+
+/// Try to enable WAL. Local storage supports it; network filesystems may reject
+/// the switch or silently keep the rollback journal. Fall back to the rollback
+/// journal when WAL cannot be acquired, so a transient lock does not abort a run.
+fn enable_wal(conn: &Connection) -> Result<String> {
+    match conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0)) {
+        Ok(mode) => Ok(mode),
+        Err(wal_error) => {
+            let fallback: String = conn
+                .query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+                .with_context(|| {
+                    format!(
+                        "enabling SQLite WAL mode failed and the rollback journal fallback failed: {wal_error}"
+                    )
+                })?;
+            eprintln!(
+                "warning: could not enable SQLite WAL mode ({wal_error}); continuing in \
+                 {fallback} journal mode. WAL requires local storage and reliable file \
+                 locks; move state.sqlite to local disk if this persists."
+            );
+            Ok(fallback)
+        }
+    }
 }
 
 fn init_schema(conn: &Connection) -> Result<()> {
