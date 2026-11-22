@@ -116,6 +116,7 @@ against the process working directory, not the directory containing the file.
 | `--max-streams <n>` | `8` | Server concurrent `/media/` streams; overrides `max_streams` in TOML. |
 | `--config <path>` | `./media-catalog.toml` if present | Shared TOML configuration file. |
 | `--events <path>` | none | Authored events content file; overrides `events_file` from TOML. |
+| `--events-only` | off | Republish the catalog from state without scanning, probing, or thumbnails. |
 
 Example `media-catalog.toml`:
 
@@ -267,6 +268,29 @@ outside its event, or reversed range fails the run before any work starts. A
 catalog without an events file publishes no event fields and remains
 byte-identical to a catalog built before event support. Events without sections
 also remain byte-identical.
+
+### Events-only runs
+
+Editing `events.toml` on a large archive does not require a full rebuild. Pass
+`--events-only` (or set `events_only = true` in `media-catalog.toml`) to
+republish the catalog JSON from the persisted state database without scanning,
+probing, or generating thumbnails. This is fast and works while the media root
+is unmounted, because the mode never reads it; the media root must still be
+configured, but its existence check is skipped. It also runs without `ffmpeg`
+and `ffprobe` on `PATH`.
+
+Events-only mode requires an existing state database: before any full build has
+run, it exits non-zero with a message telling you to run a full build first,
+and it never publishes an empty catalog. It still holds the build lock, so a
+concurrent full build is refused. State rows are never modified in this mode:
+`last_seen_run`, thumbnail status, and all other fields are preserved, and
+`--prune` and `--force` have no effect. `--dry-run` combined with `--events-only`
+validates the events file and reports what would be republished without writing
+output or state. The run summary marks the run as events-only and reports the
+republished JSON file count plus per-event item counts.
+
+The next full run cleans up normally, as if the events-only run had not
+happened.
 
 Event pages group items by authored section in chronological order when sections
 are configured; otherwise they group items by folder month, newest month and

@@ -80,7 +80,9 @@ struct ThumbOutcome {
 pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     config.validate()?;
     let event_definitions = events::load_events(config.events_file.as_deref())?;
-    probe::ensure_external_tools().context("configuration error")?;
+    if !config.events_only {
+        probe::ensure_external_tools().context("configuration error")?;
+    }
     let progress = Progress::new(config.quiet);
     progress.detail(format!("Data root: {}", config.data_root.display()));
     progress.detail(format!("State root: {}", config.state_root.display()));
@@ -91,6 +93,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     let started = Instant::now();
     let mut summary = RunSummary {
         dry_run: config.dry_run,
+        events_only: config.events_only,
         ..RunSummary::default()
     };
 
@@ -100,6 +103,14 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     } else {
         Some(BuildLock::acquire(&config.state_db)?)
     };
+
+    // Events-only mode requires an existing state database; fail before opening
+    // (which would create an empty one) and before writing any output.
+    if config.events_only && !config.dry_run && !config.state_db.exists() {
+        anyhow::bail!(
+            "events-only mode requires an existing state database; run a full build first"
+        );
+    }
 
     let mut state = if config.dry_run {
         if config.state_db.exists() {
@@ -122,6 +133,17 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
         Some(database) if !config.dry_run => database.start_run(&started_at)?,
         _ => 0,
     };
+
+    if config.events_only {
+        return run_events_only(
+            &config,
+            &mut state,
+            run_id,
+            &event_definitions,
+            &progress,
+            started,
+        );
+    }
 
     progress.phase(format!("Scanning {}", config.media_root.display()));
     let scan_result = scan::scan(&config.media_root).with_context(|| "scanning the media root")?;
@@ -521,6 +543,112 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
 
     let blocked = summary.blocked;
     Ok(RunOutcome { summary, blocked })
+}
+
+/// Map a persisted item record to a catalog input row.
+fn record_to_input(record: &state::ItemRecord) -> CatalogItemInput {
+    let thumb_available = record.thumb_status == ThumbStatus::Ok;
+    CatalogItemInput {
+        rel_path: record.path.clone(),
+        year: record.year,
+        month: record.month,
+        kind: record.kind,
+        captured_at: record.captured_at.clone(),
+        model: record.model.clone(),
+        mtime_ns: record.mtime,
+        width: record.width,
+        height: record.height,
+        duration_ms: record.duration_ms,
+        thumb_version: record.thumb_version.clone().filter(|_| thumb_available),
+        thumb_available,
+    }
+}
+
+/// Events-only fast path: rebuild the catalog from persisted state and republish JSON.
+fn run_events_only(
+    config: &Config,
+    state: &mut Option<StateDb>,
+    run_id: i64,
+    event_definitions: &[model::EventMeta],
+    progress: &Progress,
+    started: Instant,
+) -> Result<RunOutcome> {
+    let database = match state {
+        Some(db) => db,
+        None => {
+            anyhow::bail!(
+                "events-only mode requires an existing state database; run a full build first"
+            );
+        }
+    };
+
+    let items = database.load_items()?;
+    let mut inputs: Vec<CatalogItemInput> = items.values().map(record_to_input).collect();
+    inputs.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+
+    let mut catalog =
+        model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
+    events::attach_events(&mut catalog, event_definitions.to_vec())?;
+
+    let mut summary = RunSummary {
+        dry_run: config.dry_run,
+        events_only: true,
+        ..RunSummary::default()
+    };
+
+    if config.dry_run {
+        summary.event_counts = catalog
+            .events
+            .iter()
+            .map(|event| EventCount {
+                slug: event.slug.clone(),
+                count: event.item_count,
+            })
+            .collect();
+        summary.elapsed = started.elapsed();
+        progress.phase("Dry run complete: no output or state was written.");
+        return Ok(RunOutcome {
+            summary,
+            blocked: false,
+        });
+    }
+
+    progress.phase("Publishing JSON catalog (events-only)");
+    summary.json_files_written = json::write_json(&config.data_root, &catalog)?;
+    progress.phase(format!(
+        "Published {} JSON files",
+        summary.json_files_written
+    ));
+
+    summary.event_counts = catalog
+        .events
+        .iter()
+        .map(|event| EventCount {
+            slug: event.slug.clone(),
+            count: event.item_count,
+        })
+        .collect();
+    for event in &catalog.events {
+        if let Some(warning) = events::large_event_warning(event) {
+            progress.phase(format!("Warning: {warning}"));
+            summary.event_warnings.push(warning);
+        }
+    }
+
+    summary.elapsed = started.elapsed();
+    let item_count = catalog.item_count;
+    database.finish_run(
+        run_id,
+        "events-only",
+        item_count,
+        0,
+        &chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    )?;
+
+    Ok(RunOutcome {
+        summary,
+        blocked: false,
+    })
 }
 
 fn extension(rel_path: &str) -> String {

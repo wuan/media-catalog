@@ -666,3 +666,236 @@ fn prune_never_touches_files_outside_the_thumbnail_tree() {
         assert!(path.exists(), "prune removed {}", path.display());
     }
 }
+
+#[test]
+fn events_only_republishes_from_state_without_mutating_state_rows() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif("2024/05/a.jpg", Some(1), Some("2024:05:30 10:00:00"), false);
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "may-trip"
+title = "May trip"
+start = "2024-05-28 09:00"
+end = "2024-06-05 18:30"
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path.clone());
+    let full = run_with_config(config).unwrap();
+    assert!(full.summary.errors.is_empty(), "{:?}", full.summary.errors);
+    assert_eq!(full.summary.event_counts.len(), 1);
+    assert_eq!(full.summary.event_counts[0].slug, "may-trip");
+
+    // Capture state rows before the events-only run.
+    let state_before = StateDb::open(&fixture.state_db()).unwrap();
+    let items_before = state_before.load_items().unwrap();
+    let item_before = items_before.get("2024/05/a.jpg").unwrap();
+    let thumb_status_before = item_before.thumb_status;
+    let last_seen_before = item_before.last_seen_run;
+    drop(state_before);
+
+    // Edit the events file to add a new event.
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "may-trip"
+title = "May trip renamed"
+start = "2024-05-28 09:00"
+end = "2024-06-05 18:30"
+
+[[events]]
+slug = "june-trip"
+title = "June trip"
+start = "2024-06-01 00:00"
+end = "2024-06-30 23:59"
+"#,
+    )
+    .unwrap();
+
+    let mut events_config = fixture.config();
+    events_config.events_file = Some(events_path);
+    events_config.events_only = true;
+    let events_run = run_with_config(events_config).unwrap();
+    assert!(events_run.summary.events_only);
+    assert_eq!(events_run.summary.event_counts.len(), 2);
+    assert!(events_run
+        .summary
+        .event_counts
+        .iter()
+        .any(|e| e.slug == "june-trip"));
+
+    // The republished index carries the new event.
+    let index = fixture.read_json("catalog/index.json");
+    assert!(
+        index.contains("june-trip"),
+        "index missing june-trip: {index}"
+    );
+    assert!(index.contains("May trip renamed"));
+
+    // State rows are unchanged: thumb status and last_seen_run preserved.
+    let state_after = StateDb::open(&fixture.state_db()).unwrap();
+    let items_after = state_after.load_items().unwrap();
+    let item_after = items_after.get("2024/05/a.jpg").unwrap();
+    assert_eq!(item_after.thumb_status, thumb_status_before);
+    assert_eq!(item_after.last_seen_run, last_seen_before);
+    assert_eq!(state_after.item_count().unwrap(), 1);
+}
+
+#[test]
+fn events_only_succeeds_with_media_root_removed_and_byte_identical_output() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    fixture.write_image("2024/06/b.jpg", 20, 20, 2);
+
+    let full = run_with_config(fixture.config()).unwrap();
+    assert!(full.summary.errors.is_empty(), "{:?}", full.summary.errors);
+    let index_before = fixture.read_json("catalog/index.json");
+    let shard_before = fixture.read_json("catalog/2024.json");
+
+    // Remove the media root entirely.
+    std::fs::remove_dir_all(&fixture.media).unwrap();
+    assert!(!fixture.media.exists());
+
+    let mut config = fixture.config();
+    config.events_only = true;
+    let events_run = run_with_config(config).unwrap();
+    assert!(events_run.summary.events_only);
+    assert!(
+        events_run.summary.errors.is_empty(),
+        "{:?}",
+        events_run.summary.errors
+    );
+
+    // Byte-identical output.
+    assert_eq!(fixture.read_json("catalog/index.json"), index_before);
+    assert_eq!(fixture.read_json("catalog/2024.json"), shard_before);
+}
+
+#[test]
+fn events_only_without_state_db_fails_and_writes_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+
+    // No full build: state DB does not exist.
+    assert!(!fixture.state_db().exists());
+
+    let mut config = fixture.config();
+    config.events_only = true;
+    let error = run_with_config(config).unwrap_err();
+    let msg = format!("{error:#}");
+    assert!(
+        msg.contains("full build first") || msg.contains("state database"),
+        "{msg}"
+    );
+    assert!(!fixture.data.exists(), "no data should be written");
+    assert!(!fixture.state_db().exists(), "no state should be written");
+}
+
+#[test]
+fn events_only_dry_run_writes_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "may-trip"
+title = "May trip"
+start = "2024-05-01 00:00"
+end = "2024-05-31 23:59"
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path);
+    run_with_config(config).unwrap();
+
+    let index_before = fixture.read_json("catalog/index.json");
+    let shard_before = fixture.read_json("catalog/2024.json");
+
+    let mut dry_config = fixture.config();
+    dry_config.events_file = Some(fixture.root().join("events.toml"));
+    dry_config.events_only = true;
+    dry_config.dry_run = true;
+    let outcome = run_with_config(dry_config).unwrap();
+    assert!(outcome.summary.events_only);
+    assert!(outcome.summary.dry_run);
+    assert_eq!(outcome.summary.json_files_written, 0);
+
+    // Nothing was written.
+    assert_eq!(fixture.read_json("catalog/index.json"), index_before);
+    assert_eq!(fixture.read_json("catalog/2024.json"), shard_before);
+}
+
+#[test]
+fn events_only_with_prune_prunes_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    run_with_config(fixture.config()).unwrap();
+    assert!(fixture.thumb_path("2024/05/a.jpg").exists());
+
+    let mut config = fixture.config();
+    config.events_only = true;
+    config.prune = true;
+    let outcome = run_with_config(config).unwrap();
+    assert_eq!(outcome.summary.pruned, 0);
+    assert_eq!(outcome.summary.deleted, 0);
+    assert!(fixture.thumb_path("2024/05/a.jpg").exists());
+}
+
+#[test]
+fn events_only_with_invalid_events_fails_before_publishing() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    run_with_config(fixture.config()).unwrap();
+    let index_before = fixture.read_json("catalog/index.json");
+
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "bad"
+title = "Bad range"
+start = "2024-05-02 09:00"
+end = "2024-05-01 09:00"
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path);
+    config.events_only = true;
+    let error = run_with_config(config).unwrap_err();
+    assert!(error.to_string().contains("after it ends"), "{error:#}");
+
+    // Catalog output unchanged.
+    assert_eq!(fixture.read_json("catalog/index.json"), index_before);
+}
+
+#[test]
+fn events_only_still_holds_the_build_lock() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    run_with_config(fixture.config()).unwrap();
+
+    let lock = BuildLock::acquire(&fixture.state_db()).unwrap();
+
+    let mut config = fixture.config();
+    config.events_only = true;
+    let error = run_with_config(config).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("another build is already running"),
+        "{error:#}"
+    );
+
+    drop(lock);
+}

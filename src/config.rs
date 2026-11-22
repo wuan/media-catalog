@@ -65,6 +65,10 @@ pub struct Cli {
     /// configuration file.
     #[arg(long, value_name = "PATH")]
     pub events: Option<PathBuf>,
+
+    /// Republish the catalog from state without scanning, probing, or thumbnails.
+    #[arg(long)]
+    pub events_only: bool,
 }
 
 /// Optional TOML configuration shared by both binaries. Values here are
@@ -85,6 +89,7 @@ pub struct FileConfig {
     pub quiet: Option<bool>,
     pub allow_mount_drop: Option<bool>,
     pub events_file: Option<PathBuf>,
+    pub events_only: Option<bool>,
     /// Socket address for the runtime server. Ignored by the generator.
     pub bind: Option<String>,
     /// Maximum concurrent server media streams. Ignored by the generator.
@@ -136,6 +141,7 @@ pub struct Config {
     pub allow_mount_drop: bool,
     /// Authored events file, or `None` when the catalog has no events.
     pub events_file: Option<PathBuf>,
+    pub events_only: bool,
 }
 
 impl Config {
@@ -170,6 +176,7 @@ impl Config {
             quiet: true,
             allow_mount_drop: false,
             events_file: None,
+            events_only: false,
         }
     }
 
@@ -213,6 +220,7 @@ impl Config {
         let dry_run = cli.dry_run || file.dry_run.unwrap_or(false);
         let quiet = cli.quiet || file.quiet.unwrap_or(false);
         let allow_mount_drop = cli.allow_mount_drop || file.allow_mount_drop.unwrap_or(false);
+        let events_only = cli.events_only || file.events_only.unwrap_or(false);
 
         let events_file =
             resolve_events_path(cli.events.as_deref().or(file.events_file.as_deref()), &cwd)?;
@@ -231,6 +239,7 @@ impl Config {
             quiet,
             allow_mount_drop,
             events_file,
+            events_only,
         };
         config.validate()?;
         Ok(config)
@@ -241,14 +250,16 @@ impl Config {
         if self.jobs == 0 {
             bail!("--jobs must be at least 1");
         }
-        if !self.media_root.exists() {
-            bail!("media root does not exist: {}", self.media_root.display());
-        }
-        if !self.media_root.is_dir() {
-            bail!(
-                "media root is not a directory: {}",
-                self.media_root.display()
-            );
+        if !self.events_only {
+            if !self.media_root.exists() {
+                bail!("media root does not exist: {}", self.media_root.display());
+            }
+            if !self.media_root.is_dir() {
+                bail!(
+                    "media root is not a directory: {}",
+                    self.media_root.display()
+                );
+            }
         }
         if self.data_root.exists() && !self.data_root.is_dir() {
             bail!("data root is not a directory: {}", self.data_root.display());
@@ -826,5 +837,135 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("events file not found"), "{message}");
         assert!(message.contains("missing.toml"), "{message}");
+    }
+
+    #[test]
+    fn events_only_flag_enables_events_only_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let cli = Cli {
+            events_only: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, FileConfig::default(), 2).unwrap();
+        assert!(config.events_only);
+    }
+
+    #[test]
+    fn events_only_toml_key_enables_events_only_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            events_only: Some(true),
+            ..FileConfig::default()
+        };
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            file,
+            2,
+        )
+        .unwrap();
+        assert!(config.events_only);
+    }
+
+    #[test]
+    fn events_only_flag_wins_over_toml_false() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            events_only: Some(false),
+            ..FileConfig::default()
+        };
+        let cli = Cli {
+            events_only: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, file, 2).unwrap();
+        assert!(config.events_only);
+    }
+
+    #[test]
+    fn events_only_defaults_to_off() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            FileConfig::default(),
+            2,
+        )
+        .unwrap();
+        assert!(!config.events_only);
+    }
+
+    #[test]
+    fn server_parses_events_only_key_from_shared_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "media_root = \"./media\"\nevents_only = true\nbind = \"0.0.0.0:9090\"\n",
+        )
+        .unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
+        assert_eq!(file.events_only, Some(true));
+        assert_eq!(file.bind.as_deref(), Some("0.0.0.0:9090"));
+    }
+
+    #[test]
+    fn events_only_skips_media_root_existence_check() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("nonexistent-media");
+        let mut config =
+            Config::with_roots(&media, temp.path().join("data"), temp.path().join("state"));
+        config.events_only = true;
+        config
+            .validate()
+            .expect("events-only validates without media root");
+    }
+
+    #[test]
+    fn full_build_still_requires_media_root_to_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("nonexistent-media");
+        let config =
+            Config::with_roots(&media, temp.path().join("data"), temp.path().join("state"));
+        let error = config.validate().unwrap_err();
+        assert!(
+            error.to_string().contains("media root does not exist"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn events_only_still_rejects_non_directory_media_root_when_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media-file");
+        std::fs::write(&media, b"not a dir").unwrap();
+        let mut config =
+            Config::with_roots(&media, temp.path().join("data"), temp.path().join("state"));
+        config.events_only = true;
+        config
+            .validate()
+            .expect("events-only skips is_dir check too");
     }
 }

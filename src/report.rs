@@ -18,6 +18,7 @@ pub struct EventCount {
 #[derive(Debug, Clone, Default)]
 pub struct RunSummary {
     pub dry_run: bool,
+    pub events_only: bool,
     pub scanned: usize,
     pub images: usize,
     pub videos: usize,
@@ -55,22 +56,30 @@ impl RunSummary {
         if self.dry_run {
             lines.push("Dry run: no output or state was written.".to_string());
         }
-        lines.push(format!(
-            "Scanned: {} items ({} images, {} videos)",
-            self.scanned, self.images, self.videos
-        ));
-        lines.push(format!(
-            "New: {}, changed: {}, unchanged: {}",
-            self.new, self.changed, self.unchanged
-        ));
-        lines.push(format!("Probed: {}", self.probed));
-        lines.push(format!(
-            "Thumbnails: {} generated, {} skipped, {} failed, {} unsupported",
-            self.thumbnails_generated,
-            self.thumbnails_skipped,
-            self.thumbnails_failed,
-            self.thumbnails_unsupported
-        ));
+        if self.events_only {
+            lines.push(
+                "Events-only run: scanning, probing, and thumbnail generation were skipped."
+                    .to_string(),
+            );
+        }
+        if !self.events_only {
+            lines.push(format!(
+                "Scanned: {} items ({} images, {} videos)",
+                self.scanned, self.images, self.videos
+            ));
+            lines.push(format!(
+                "New: {}, changed: {}, unchanged: {}",
+                self.new, self.changed, self.unchanged
+            ));
+            lines.push(format!("Probed: {}", self.probed));
+            lines.push(format!(
+                "Thumbnails: {} generated, {} skipped, {} failed, {} unsupported",
+                self.thumbnails_generated,
+                self.thumbnails_skipped,
+                self.thumbnails_failed,
+                self.thumbnails_unsupported
+            ));
+        }
         if !self.dry_run {
             lines.push(format!("Output: {} JSON files", self.json_files_written));
             if self.deleted > 0 {
@@ -162,5 +171,26 @@ mod tests {
         assert!(rendered.contains("- trip: 12 items"));
         assert!(rendered.contains("- season: 750 items"));
         assert!(rendered.contains("Warning: event \"season\" matched 750 items"));
+    }
+
+    #[test]
+    fn summary_marks_events_only_runs() {
+        let summary = RunSummary {
+            events_only: true,
+            json_files_written: 2,
+            event_counts: vec![EventCount {
+                slug: "may-trip".into(),
+                count: 5,
+            }],
+            ..RunSummary::default()
+        };
+        let rendered = summary.render();
+        assert!(rendered.contains("Events-only run"));
+        assert!(rendered.contains("skipped"));
+        assert!(!rendered.contains("Scanned:"));
+        assert!(!rendered.contains("Probed:"));
+        assert!(!rendered.contains("Thumbnails:"));
+        assert!(rendered.contains("Output: 2 JSON files"));
+        assert!(rendered.contains("- may-trip: 5 items"));
     }
 }
