@@ -56,6 +56,14 @@
     );
   }
 
+  function fittedBox(width, height, stageWidth, stageHeight) {
+    if (!width || !height || !stageWidth || !stageHeight) {
+      return null;
+    }
+    var fit = Math.min(stageWidth / width, stageHeight / height);
+    return { width: width * fit, height: height * fit };
+  }
+
   function clampPan(x, y, scale, baseWidth, baseHeight, stageWidth, stageHeight) {
     var maxX = Math.max(0, ((baseWidth || 0) * scale - stageWidth) / 2);
     var maxY = Math.max(0, ((baseHeight || 0) * scale - stageHeight) / 2);
@@ -441,6 +449,15 @@
     state.media = image;
     state.mediaKind = "image";
 
+    if (item.thumbUrl && item.width && item.height) {
+      image.classList.add("is-placeholder");
+      var box = fittedBox(item.width, item.height, state.stageWidth, state.stageHeight);
+      if (box) {
+        image.style.width = box.width + "px";
+        image.style.height = box.height + "px";
+      }
+    }
+
     image.addEventListener("load", measureFit);
 
     var original = new Image();
@@ -448,6 +465,9 @@
       if (state.media !== image) {
         return;
       }
+      image.classList.remove("is-placeholder");
+      image.style.width = "";
+      image.style.height = "";
       image.src = item.mediaUrl;
       image.classList.add("is-original");
     };
@@ -500,9 +520,14 @@
     if (!media || state.mediaKind !== "image") {
       return;
     }
+    var item = state.items[state.index];
     var stageRect = stage.getBoundingClientRect();
     var naturalWidth = media.naturalWidth || media.width;
     var naturalHeight = media.naturalHeight || media.height;
+    if (item && item.width && item.height) {
+      naturalWidth = item.width;
+      naturalHeight = item.height;
+    }
     if (!naturalWidth || !naturalHeight || !stageRect.width || !stageRect.height) {
       return;
     }
@@ -974,7 +999,8 @@
     nextIndex: nextIndex,
     swipeThreshold: swipeThreshold,
     isSwipe: isSwipe,
-    tileFromElement: tileFromElement
+    tileFromElement: tileFromElement,
+    fittedBox: fittedBox
   };
 
   if (typeof document !== "undefined" && typeof window !== "undefined") {

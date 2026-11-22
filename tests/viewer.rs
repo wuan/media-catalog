@@ -61,4 +61,11 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["tileName"], "a.jpg");
     assert_eq!(result["tileCaptured"], "2024-05-01 10:00:00");
     assert_eq!(result["tileAlt"], "a.jpg");
+    assert_eq!(result["tileWidth"], 4000.0);
+    assert_eq!(result["tileHeight"], 3000.0);
+    assert_eq!(result["fitWide"]["width"], 1000.0);
+    assert_eq!(result["fitWide"]["height"], 750.0);
+    assert_eq!(result["fitTall"]["width"], 600.0);
+    assert_eq!(result["fitTall"]["height"], 800.0);
+    assert_eq!(result["fitMissing"], Value::Null);
 }

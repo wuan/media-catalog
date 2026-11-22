@@ -57,7 +57,12 @@ const result = {
   swipeSmall: api.isSwipe(30, 0, 200),
   tileName: tile.name,
   tileCaptured: tile.captured,
-  tileAlt: tile.alt
+  tileAlt: tile.alt,
+  tileWidth: tile.width,
+  tileHeight: tile.height,
+  fitWide: api.fittedBox(4000, 3000, 1000, 800),
+  fitTall: api.fittedBox(3000, 4000, 1000, 800),
+  fitMissing: api.fittedBox(0, 0, 1000, 800)
 };
 
 console.log(JSON.stringify(result));
