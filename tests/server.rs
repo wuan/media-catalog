@@ -6,7 +6,7 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use axum::Router;
 use media_catalog::json;
-use media_catalog::model::{build_catalog, Catalog, CatalogItemInput, EventMeta};
+use media_catalog::model::{build_catalog, Catalog, CatalogItemInput, EventMeta, EventSection};
 use media_catalog::scan::MediaKind;
 use media_catalog::server::{app_state, router, router_from_state, serve_listener, ServerConfig};
 use tempfile::TempDir;
@@ -147,6 +147,49 @@ fn event_catalog() -> Catalog {
             end: "2024-06-30 23:59".into(),
             description: Some("A crossing event.".into()),
             item_count: 0,
+            sections: Vec::new(),
+        }],
+    )
+    .unwrap();
+    catalog
+}
+
+fn sectioned_catalog() -> Catalog {
+    let mut catalog = item_catalog(vec![
+        CatalogItemInput {
+            captured_at: Some("2024-05-02 10:00:00".into()),
+            ..item("2024/05/lisbon.jpg", MediaKind::Image)
+        },
+        CatalogItemInput {
+            captured_at: Some("2024-05-10 10:00:00".into()),
+            ..item("2024/05/algarve.jpg", MediaKind::Image)
+        },
+    ]);
+    media_catalog::events::attach_events(
+        &mut catalog,
+        vec![EventMeta {
+            slug: "portugal".into(),
+            title: "Portugal".into(),
+            start: "2024-05-01 00:00".into(),
+            end: "2024-05-31 23:59".into(),
+            description: Some("Five weeks in Portugal.".into()),
+            item_count: 0,
+            sections: vec![
+                EventSection {
+                    slug: "lisbon".into(),
+                    title: "Lisbon".into(),
+                    start: "2024-05-01 00:00".into(),
+                    end: "2024-05-09 23:59".into(),
+                    description: None,
+                },
+                EventSection {
+                    slug: "algarve".into(),
+                    title: "Algarve".into(),
+                    start: "2024-05-10 00:00".into(),
+                    end: "2024-05-31 23:59".into(),
+                    description: None,
+                },
+            ],
         }],
     )
     .unwrap();
@@ -369,6 +412,41 @@ async fn renders_event_routes_as_a_second_browsing_axis() {
             .unwrap()
             > 0
     );
+}
+
+#[tokio::test]
+async fn serves_sectioned_event_pages_with_navigation_and_range_headings() {
+    let fixture = Fixture::new();
+    write_catalog(&fixture.data, &sectioned_catalog());
+    let app = router(fixture.config()).unwrap();
+
+    let (status, _, body) = send(app.clone(), Method::GET, "/events/portugal/").await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("<nav class=\"section-nav\" aria-label=\"Sections\">"));
+    assert!(html.contains("href=\"#lisbon\""));
+    assert!(html.contains("href=\"#algarve\""));
+    assert!(html.contains("2024-05-01 00:00 to 2024-05-09 23:59"));
+    assert!(html.contains("2024-05-10 00:00 to 2024-05-31 23:59"));
+    assert!(!html.contains("class=\"month-section\""));
+
+    let lisbon_heading = html.find("id=\"lisbon\"").expect("Lisbon section");
+    let lisbon_item = html
+        .find("href=\"/media/2024/05/lisbon.jpg\"")
+        .expect("Lisbon item");
+    let algarve_heading = html.find("id=\"algarve\"").expect("Algarve section");
+    let algarve_item = html
+        .find("href=\"/media/2024/05/algarve.jpg\"")
+        .expect("Algarve item");
+    assert!(lisbon_heading < lisbon_item);
+    assert!(lisbon_item < algarve_heading);
+    assert!(algarve_heading < algarve_item);
+
+    let (status, _, body) = send(app, Method::GET, "/catalog/index.json").await;
+    assert_eq!(status, StatusCode::OK);
+    let index = String::from_utf8_lossy(&body);
+    assert!(index.contains("\"sections\": ["));
+    assert!(index.contains("\"slug\": \"lisbon\""));
 }
 
 #[tokio::test]

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::events;
 use crate::fsutil::write_atomic;
 use crate::model::{
-    month_label, month_short_label, Catalog, EventMeta, EventView, ItemView, MonthView, YearView,
+    month_label, month_short_label, Catalog, EventMeta, EventSection, EventView, ItemView,
+    MonthView, SectionView, YearView,
 };
 use crate::paths::item_name;
 use crate::scan::MediaKind;
@@ -32,7 +33,44 @@ pub struct IndexEvent {
     pub end: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Resolved section ranges. Omitted for month-grouped events.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<IndexSection>,
     pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexSection {
+    pub slug: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl From<&EventSection> for IndexSection {
+    fn from(section: &EventSection) -> Self {
+        Self {
+            slug: section.slug.clone(),
+            title: section.title.clone(),
+            start: section.start.clone(),
+            end: section.end.clone(),
+            description: section.description.clone(),
+        }
+    }
+}
+
+impl From<&SectionView> for IndexSection {
+    fn from(section: &SectionView) -> Self {
+        Self {
+            slug: section.slug.clone(),
+            title: section.title.clone(),
+            start: section.start.clone(),
+            end: section.end.clone(),
+            description: section.description.clone(),
+        }
+    }
 }
 
 impl From<&EventView> for IndexEvent {
@@ -43,6 +81,7 @@ impl From<&EventView> for IndexEvent {
             start: event.start.clone(),
             end: event.end.clone(),
             description: event.description.clone(),
+            sections: event.sections.iter().map(IndexSection::from).collect(),
             count: event.item_count,
         }
     }
@@ -57,6 +96,17 @@ impl IndexEvent {
             end: self.end.clone(),
             description: self.description.clone(),
             item_count: self.count,
+            sections: self
+                .sections
+                .iter()
+                .map(|section| EventSection {
+                    slug: section.slug.clone(),
+                    title: section.title.clone(),
+                    start: section.start.clone(),
+                    end: section.end.clone(),
+                    description: section.description.clone(),
+                })
+                .collect(),
         }
     }
 }
@@ -575,6 +625,7 @@ mod tests {
                     end: "2024-06-05 18:30".into(),
                     description: Some("A crossing event.".into()),
                     item_count: 0,
+                    sections: Vec::new(),
                 },
                 EventMeta {
                     slug: "june".into(),
@@ -583,6 +634,7 @@ mod tests {
                     end: "2024-06-30 23:59".into(),
                     description: None,
                     item_count: 0,
+                    sections: Vec::new(),
                 },
             ],
         )
@@ -612,6 +664,146 @@ mod tests {
         let second = render_json(&event_catalog()).unwrap();
         assert_eq!(first.index, second.index);
         assert_eq!(first.shards, second.shards);
+    }
+
+    fn section_event_catalog() -> Catalog {
+        let mut catalog = build_catalog(
+            vec![
+                CatalogItemInput {
+                    rel_path: "2024/05/lisbon.jpg".into(),
+                    year: 2024,
+                    month: 5,
+                    kind: MediaKind::Image,
+                    captured_at: Some("2024-05-02 10:00:00".into()),
+                    mtime_ns: 0,
+                    width: Some(4000),
+                    height: Some(3000),
+                    duration_ms: None,
+                    thumb_version: Some("10-20".into()),
+                    thumb_available: true,
+                },
+                CatalogItemInput {
+                    rel_path: "2024/05/algarve.jpg".into(),
+                    year: 2024,
+                    month: 5,
+                    kind: MediaKind::Image,
+                    captured_at: Some("2024-05-10 10:00:00".into()),
+                    mtime_ns: 0,
+                    width: Some(4000),
+                    height: Some(3000),
+                    duration_ms: None,
+                    thumb_version: Some("11-21".into()),
+                    thumb_available: true,
+                },
+            ],
+            "/media",
+            "/thumbs",
+        );
+        crate::events::attach_events(
+            &mut catalog,
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![
+                    EventSection {
+                        slug: "lisbon".into(),
+                        title: "Lisbon".into(),
+                        start: "2024-05-01 00:00".into(),
+                        end: "2024-05-09 23:59".into(),
+                        description: Some("Capital".into()),
+                    },
+                    EventSection {
+                        slug: "algarve".into(),
+                        title: "Algarve".into(),
+                        start: "2024-05-10 00:00".into(),
+                        end: "2024-05-31 23:59".into(),
+                        description: None,
+                    },
+                ],
+            }],
+        )
+        .unwrap();
+        catalog
+    }
+
+    #[test]
+    fn publishes_and_round_trips_section_ranges() {
+        let original = section_event_catalog();
+        let output = render_json(&original).unwrap();
+        assert!(output.index.contains("\"slug\": \"lisbon\""));
+        assert!(output.index.contains("\"end\": \"2024-05-09 23:59\""));
+        insta::assert_snapshot!("index_sections_json", output.index);
+
+        let parsed = catalog_from_json(&output.index, &output.shards).unwrap();
+        let event = parsed.event("portugal").unwrap();
+        assert_eq!(event.sections.len(), 2);
+        assert_eq!(event.sections[0].slug, "lisbon");
+        assert_eq!(event.sections[0].items[0].path, "2024/05/lisbon.jpg");
+        assert_eq!(event.sections[1].items[0].path, "2024/05/algarve.jpg");
+        assert!(event.other_items.is_empty());
+
+        let rerendered = render_json(&parsed).unwrap();
+        assert_eq!(rerendered.index, output.index);
+        assert_eq!(rerendered.shards, output.shards);
+    }
+
+    #[test]
+    fn readme_json_example_matches_generated_sections() {
+        let readme = include_str!("../README.md");
+        let json_section = &readme[readme
+            .find("## JSON catalog and search")
+            .expect("README JSON section")..];
+        let json_start = json_section.find("```json").expect("README JSON block") + 7;
+        let json_end = json_start + json_section[json_start..].find("```").expect("block end");
+        let index = parse_index(&json_section[json_start..json_end]).unwrap();
+
+        let toml_start = readme.find("[[events]]").expect("README event example");
+        let toml_end = toml_start + readme[toml_start..].find("```").expect("block end");
+        let events =
+            crate::events::parse_events(&readme[toml_start..toml_end], "README.md").unwrap();
+
+        let published = index.events[0]
+            .sections
+            .iter()
+            .map(|section| EventSection {
+                slug: section.slug.clone(),
+                title: section.title.clone(),
+                start: section.start.clone(),
+                end: section.end.clone(),
+                description: section.description.clone(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(published, events[0].sections);
+    }
+
+    #[test]
+    fn rejects_invalid_published_sections() {
+        let output = render_json(&section_event_catalog()).unwrap();
+        let mut index = parse_index(&output.index).unwrap();
+        let shards = index
+            .years
+            .iter()
+            .map(|year| (year.year, parse_shard(&output.shards[&year.year]).unwrap()))
+            .collect::<BTreeMap<_, _>>();
+
+        index.events[0].sections[1].start = "2024-05-09 23:59".into();
+        index.events[0].sections[1].end = "2024-05-31 23:59".into();
+        let error = catalog_from_parts(&index, &shards).unwrap_err();
+        assert!(error.to_string().contains("overlaps or is out of order"));
+
+        let mut outside = parse_index(&output.index).unwrap();
+        outside.events[0].sections[0].start = "2024-04-30 00:00".into();
+        let error = catalog_from_parts(&outside, &shards).unwrap_err();
+        assert!(error.to_string().contains("outside"));
+
+        let mut duplicate = parse_index(&output.index).unwrap();
+        duplicate.events[0].sections[1].slug = "lisbon".into();
+        let error = catalog_from_parts(&duplicate, &shards).unwrap_err();
+        assert!(error.to_string().contains("duplicate section slug"));
     }
 
     #[test]

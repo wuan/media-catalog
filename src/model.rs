@@ -46,6 +46,19 @@ pub struct ItemView {
     pub events: Vec<String>,
 }
 
+/// An event section resolved to an inclusive published range.
+///
+/// Authors declare a bookmark timestamp; the generator publishes concrete
+/// `start`/`end` ranges so the server never interprets bookmark semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventSection {
+    pub slug: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub description: Option<String>,
+}
+
 /// Authored event metadata shared by the generator and the server.
 ///
 /// `start` and `end` are canonical `YYYY-MM-DD HH:MM` strings, so lexical order
@@ -59,6 +72,18 @@ pub struct EventMeta {
     pub end: String,
     pub description: Option<String>,
     pub item_count: usize,
+    pub sections: Vec<EventSection>,
+}
+
+/// A published section with the items whose timestamps fall inside its range.
+#[derive(Debug, Clone)]
+pub struct SectionView {
+    pub slug: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub description: Option<String>,
+    pub items: Vec<ItemView>,
 }
 
 /// One event and its matching items grouped by folder month.
@@ -71,6 +96,10 @@ pub struct EventView {
     pub description: Option<String>,
     pub item_count: usize,
     pub months: Vec<MonthView>,
+    /// Published sections in chronological order; empty for month-grouped events.
+    pub sections: Vec<SectionView>,
+    /// Event items that fall outside every published section.
+    pub other_items: Vec<ItemView>,
 }
 
 /// One month of items.

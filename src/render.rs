@@ -41,11 +41,30 @@ struct EventTemplate {
     description: String,
     item_count: usize,
     months: Vec<EventMonthSection>,
+    has_sections: bool,
+    section_nav: Vec<SectionLink>,
+    sections: Vec<EventSectionSection>,
+    other_items: Vec<TileView>,
 }
 
 struct EventMonthSection {
     label: String,
     url: String,
+    count: usize,
+    items: Vec<TileView>,
+}
+
+struct SectionLink {
+    slug: String,
+    title: String,
+    count: usize,
+}
+
+struct EventSectionSection {
+    slug: String,
+    title: String,
+    range: String,
+    description: String,
     count: usize,
     items: Vec<TileView>,
 }
@@ -122,6 +141,27 @@ pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
     let Some(event) = catalog.event(slug) else {
         return Ok(None);
     };
+    let sections = event
+        .sections
+        .iter()
+        .filter(|section| !section.items.is_empty())
+        .map(|section| EventSectionSection {
+            slug: section.slug.clone(),
+            title: section.title.clone(),
+            range: format!("{} to {}", section.start, section.end),
+            description: section.description.clone().unwrap_or_default(),
+            count: section.items.len(),
+            items: section.items.iter().map(tile_from_item).collect(),
+        })
+        .collect::<Vec<_>>();
+    let section_nav = sections
+        .iter()
+        .map(|section| SectionLink {
+            slug: section.slug.clone(),
+            title: section.title.clone(),
+            count: section.count,
+        })
+        .collect();
     let html = EventTemplate {
         title: event.title.clone(),
         range: event_range(event),
@@ -137,6 +177,10 @@ pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
                 items: month.items.iter().map(tile_from_item).collect(),
             })
             .collect(),
+        has_sections: !event.sections.is_empty(),
+        section_nav,
+        sections,
+        other_items: event.other_items.iter().map(tile_from_item).collect(),
     }
     .render()
     .with_context(|| format!("rendering event {}", event.slug))?;
@@ -235,7 +279,7 @@ pub fn format_duration(duration_ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{build_catalog, CatalogItemInput, EventMeta};
+    use crate::model::{build_catalog, CatalogItemInput, EventMeta, EventSection};
 
     fn item(path: &str, year: i32, month: u32, captured_at: &str) -> CatalogItemInput {
         CatalogItemInput {
@@ -394,6 +438,7 @@ mod tests {
             end: end.to_string(),
             description: None,
             item_count: 0,
+            sections: Vec::new(),
         }
     }
 
@@ -416,6 +461,7 @@ mod tests {
                 end: "2024-06-05 18:30".into(),
                 description: Some("A crossing event.".into()),
                 item_count: 0,
+                sections: Vec::new(),
             }],
         )
     }
@@ -451,6 +497,173 @@ mod tests {
             .unwrap()
             .unwrap();
         insta::assert_snapshot!("event_may_trip", html);
+    }
+
+    fn section(slug: &str, title: &str, start: &str, end: &str) -> EventSection {
+        EventSection {
+            slug: slug.to_string(),
+            title: title.to_string(),
+            start: start.to_string(),
+            end: end.to_string(),
+            description: None,
+        }
+    }
+
+    fn sectioned_catalog() -> Catalog {
+        event_catalog(
+            vec![
+                item("2024/05/lisbon.jpg", 2024, 5, "2024-05-02 10:00:00"),
+                item("2024/05/algarve.jpg", 2024, 5, "2024-05-10 10:00:00"),
+            ],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: Some("Five weeks in Portugal.".into()),
+                item_count: 0,
+                sections: vec![
+                    section("lisbon", "Lisbon", "2024-05-01 00:00", "2024-05-09 23:59"),
+                    section("algarve", "Algarve", "2024-05-10 00:00", "2024-05-31 23:59"),
+                ],
+            }],
+        )
+    }
+
+    #[test]
+    fn snapshot_sectioned_event_page() {
+        let html = render_event(&sectioned_catalog(), "portugal")
+            .unwrap()
+            .unwrap();
+        insta::assert_snapshot!("event_portugal_sections", html);
+    }
+
+    #[test]
+    fn sectioned_event_page_navigates_and_groups_items_chronologically() {
+        let html = render_event(&sectioned_catalog(), "portugal")
+            .unwrap()
+            .unwrap();
+        assert!(html.contains("<nav class=\"section-nav\" aria-label=\"Sections\">"));
+        assert!(html.contains("href=\"#lisbon\""));
+        assert!(html.contains("href=\"#algarve\""));
+        assert!(html.contains("id=\"lisbon\""));
+        assert!(html.contains("id=\"algarve\""));
+        assert!(html.contains("2024-05-01 00:00 to 2024-05-09 23:59"));
+        assert!(html.contains("2024-05-10 00:00 to 2024-05-31 23:59"));
+        assert!(!html.contains("class=\"month-section\""));
+
+        let lisbon_nav = html.find("href=\"#lisbon\"").unwrap();
+        let algarve_nav = html.find("href=\"#algarve\"").unwrap();
+        assert!(lisbon_nav < algarve_nav);
+
+        let lisbon_item = html.find("href=\"/media/2024/05/lisbon.jpg\"").unwrap();
+        let algarve_item = html.find("href=\"/media/2024/05/algarve.jpg\"").unwrap();
+        let lisbon_heading = html.find("id=\"lisbon\"").unwrap();
+        let algarve_heading = html.find("id=\"algarve\"").unwrap();
+        assert!(lisbon_heading < lisbon_item && lisbon_item < algarve_heading);
+        assert!(algarve_heading < algarve_item);
+        assert!(!html.contains("<script"));
+    }
+
+    #[test]
+    fn empty_sections_are_omitted_from_content_and_navigation() {
+        let catalog = event_catalog(
+            vec![item("2024/05/algarve.jpg", 2024, 5, "2024-05-10 10:00:00")],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![
+                    section("lisbon", "Lisbon", "2024-05-01 00:00", "2024-05-09 23:59"),
+                    section("algarve", "Algarve", "2024-05-10 00:00", "2024-05-31 23:59"),
+                ],
+            }],
+        );
+        let html = render_event(&catalog, "portugal").unwrap().unwrap();
+        assert!(!html.contains("id=\"lisbon\""));
+        assert!(!html.contains("href=\"#lisbon\""));
+        assert!(html.contains("id=\"algarve\""));
+        assert!(html.contains("href=\"#algarve\""));
+    }
+
+    #[test]
+    fn other_bucket_renders_items_outside_published_sections() {
+        let catalog = event_catalog(
+            vec![
+                item("2024/05/before.jpg", 2024, 5, "2024-05-01 00:00:00"),
+                item("2024/05/inside.jpg", 2024, 5, "2024-05-10 10:00:00"),
+                item("2024/05/gap.jpg", 2024, 5, "2024-05-20 10:00:00"),
+            ],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![section(
+                    "lisbon",
+                    "Lisbon",
+                    "2024-05-05 00:00",
+                    "2024-05-15 23:59",
+                )],
+            }],
+        );
+        let html = render_event(&catalog, "portugal").unwrap().unwrap();
+        assert!(html.contains("id=\"other\""));
+        let other = html.find("id=\"other\"").unwrap();
+        assert!(html.find("href=\"/media/2024/05/before.jpg\"").unwrap() > other);
+        assert!(html.find("href=\"/media/2024/05/gap.jpg\"").unwrap() > other);
+        assert!(html.find("href=\"/media/2024/05/inside.jpg\"").unwrap() < other);
+
+        let covered = event_catalog(
+            vec![item("2024/05/inside.jpg", 2024, 5, "2024-05-10 10:00:00")],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![section(
+                    "lisbon",
+                    "Lisbon",
+                    "2024-05-05 00:00",
+                    "2024-05-15 23:59",
+                )],
+            }],
+        );
+        let html = render_event(&covered, "portugal").unwrap().unwrap();
+        assert!(!html.contains("id=\"other\""));
+    }
+
+    #[test]
+    fn configured_sections_replace_month_groups_even_when_all_sections_are_empty() {
+        let catalog = event_catalog(
+            vec![item("2024/05/gap.jpg", 2024, 5, "2024-05-20 10:00:00")],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![section(
+                    "lisbon",
+                    "Lisbon",
+                    "2024-05-01 00:00",
+                    "2024-05-09 23:59",
+                )],
+            }],
+        );
+        let html = render_event(&catalog, "portugal").unwrap().unwrap();
+        assert!(!html.contains("class=\"month-section\""));
+        assert!(!html.contains("class=\"section-nav\""));
+        assert!(html.contains("id=\"other\""));
+        assert!(html.contains("href=\"/media/2024/05/gap.jpg\""));
     }
 
     #[test]

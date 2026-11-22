@@ -398,6 +398,7 @@ mod tests {
                 end: "2024-05-31 23:59".into(),
                 description: None,
                 item_count: 0,
+                sections: Vec::new(),
             }],
         )
         .unwrap();
@@ -458,6 +459,72 @@ mod tests {
         let snapshot = store.current().await.unwrap();
         assert_eq!(snapshot.catalog.item_count, 1);
         assert!(snapshot.catalog.year(2025).is_none());
+    }
+
+    fn sectioned_event_catalog(count: usize) -> Catalog {
+        let items = (0..count)
+            .map(|index| item(&format!("2024/05/{index}.jpg"), 2024, 5))
+            .collect();
+        let mut catalog = build_catalog(items, "/media", "/thumbs");
+        crate::events::attach_events(
+            &mut catalog,
+            vec![EventMeta {
+                slug: "trip".into(),
+                title: "Trip".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![
+                    crate::model::EventSection {
+                        slug: "first".into(),
+                        title: "First".into(),
+                        start: "2024-05-01 00:00".into(),
+                        end: "2024-05-09 23:59".into(),
+                        description: None,
+                    },
+                    crate::model::EventSection {
+                        slug: "second".into(),
+                        title: "Second".into(),
+                        start: "2024-05-10 00:00".into(),
+                        end: "2024-05-31 23:59".into(),
+                        description: None,
+                    },
+                ],
+            }],
+        )
+        .unwrap();
+        catalog
+    }
+
+    #[tokio::test]
+    async fn keeps_the_previous_snapshot_when_published_sections_are_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = CatalogStore::new(temp.path().to_path_buf());
+
+        write_catalog(temp.path(), &sectioned_event_catalog(2));
+        let snapshot = store.current().await.unwrap();
+        assert_eq!(snapshot.catalog.events[0].sections.len(), 2);
+        let first_id = snapshot.id;
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let output = crate::json::render_json(&sectioned_event_catalog(3)).unwrap();
+        let mut index = crate::json::parse_index(&output.index).unwrap();
+        index.events[0].sections[1].start = "2024-05-09 23:59".into();
+        let catalog_dir = temp.path().join("catalog");
+        for (year, shard) in &output.shards {
+            std::fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();
+        }
+        std::fs::write(
+            catalog_dir.join("index.json"),
+            serde_json::to_string_pretty(&index).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = store.current().await.unwrap();
+        assert_eq!(snapshot.id, first_id);
+        assert_eq!(snapshot.catalog.item_count, 2);
+        assert_eq!(snapshot.catalog.events[0].sections.len(), 2);
     }
 
     #[tokio::test]

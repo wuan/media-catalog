@@ -1,0 +1,45 @@
+---
+source: src/json.rs
+expression: output.index
+---
+{
+  "schema_version": 1,
+  "total_items": 2,
+  "years": [
+    {
+      "year": 2024,
+      "count": 2,
+      "months": [
+        {
+          "month": 5,
+          "count": 2
+        }
+      ],
+      "shard": "catalog/2024.json"
+    }
+  ],
+  "events": [
+    {
+      "slug": "portugal",
+      "title": "Portugal",
+      "start": "2024-05-01 00:00",
+      "end": "2024-05-31 23:59",
+      "sections": [
+        {
+          "slug": "lisbon",
+          "title": "Lisbon",
+          "start": "2024-05-01 00:00",
+          "end": "2024-05-09 23:59",
+          "description": "Capital"
+        },
+        {
+          "slug": "algarve",
+          "title": "Algarve",
+          "start": "2024-05-10 00:00",
+          "end": "2024-05-31 23:59"
+        }
+      ],
+      "count": 2
+    }
+  ]
+}

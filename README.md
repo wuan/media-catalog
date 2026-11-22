@@ -194,6 +194,17 @@ title = "Alps trip 2024"
 start = "2024-05-28 09:00"
 end = "2024-06-05 18:30"
 description = "Hiking around Chamonix."
+
+[[events.sections]]
+slug = "chamonix"
+title = "Chamonix"
+at = "2024-05-28 09:00"
+
+[[events.sections]]
+slug = "zermatt"
+title = "Zermatt"
+at = "2024-06-01 08:00"
+description = "The Matterhorn leg."
 ```
 
 - `slug`: stable URL segment using lowercase ASCII letters, digits, and single
@@ -202,6 +213,11 @@ description = "Hiking around Chamonix."
 - `start`, `end`: inclusive timestamps in `YYYY-MM-DD HH:MM` form; `start` must
   not be after `end`.
 - `description`: optional text displayed on the event page.
+- `sections`: optional list of bookmark sections on the event. Each section has
+  a `slug` using the same rules as event slugs but unique within the event, a
+  non-empty `title`, an `at` bookmark timestamp, and an optional `description`.
+  Section slugs are scoped to their parent event and are used only as in-page
+  fragment ids, never as routes.
 
 An item belongs to an event when its effective capture timestamp, truncated to
 the minute, lies inside the inclusive range. The effective timestamp is the EXIF
@@ -210,17 +226,30 @@ the timestamp, not the folder: an item stored under `2024/06` with a May capture
 time can appear in a May event while its year/month browsing remains `2024/06`.
 Overlapping events are allowed and an item may belong to several.
 
+Sections are authored as bookmarks and published as resolved ranges. A section
+starts at its `at`, a non-last section ends one minute before the next section's
+`at`, and the last section ends at the event end. Boundaries are inclusive and
+truncated to the minute like event membership, so an item exactly at the next
+bookmark belongs to the later section. Sections are published in chronological
+order.
+
 The generator validates slugs, titles, timestamps, and ranges before scanning. A
-missing explicit `--events` path, duplicate slug, malformed timestamp, or reversed
+missing explicit `--events` path, duplicate event or section slug, duplicate
+section timestamp, malformed timestamp, section outside its event, or reversed
 range fails the run before any work starts. A catalog without an events file
 publishes no event fields and remains byte-identical to a catalog built before
-event support.
+event support. Events without sections also remain byte-identical.
 
-Event pages group items by folder month, newest month and newest item first.
-Month headings link to the normal `/YYYY/MM/` pages. The run summary reports each
-configured event and its matched item count; an event with more than 500 items
-produces a warning because a page that large is a signal to split the event or
-add a future month substructure.
+Event pages group items by authored section in chronological order when sections
+are configured; otherwise they group items by folder month, newest month and
+newest item first. Month headings link to the normal `/YYYY/MM/` pages. A
+sectioned page includes in-page navigation to each non-empty section, and
+sections whose ranges match no items are omitted from both the page and its
+navigation. Items outside every published section appear in an "Other" bucket
+after the authored sections; the bucket is omitted when empty. The run summary
+reports each configured event and its matched item count; an event with more
+than 500 items produces a warning because a page that large is a signal to split
+the event or add section bookmarks.
 
 ## Thumbnails
 
@@ -266,16 +295,18 @@ interrupted publication therefore leaves the previous complete catalog in place.
 The server keeps an immutable in-memory snapshot loaded from the index and its
 shards. It checks the index metadata on each catalog request and reloads when it
 changes. A reload that cannot read every referenced shard, or that contains
-duplicate or undeclared event slugs or event counts that disagree with shard
-membership, is discarded, so the previous snapshot keeps serving and visitors
-never see a partial catalog.
+duplicate or undeclared event slugs, event counts that disagree with shard
+membership, or inconsistent published sections (duplicate slugs, unparseable or
+out-of-range timestamps, unordered or overlapping ranges), is discarded, so the
+previous snapshot keeps serving and visitors never see a partial catalog.
 
 Catalog pages are rendered per request with Askama:
 
 - root years index at `/`
 - months for a year at `/{year}/`
 - lazy-loaded item grid at `/{year}/{month}/`
-- event list at `/events/` and one month-grouped page per event at `/events/{slug}/`
+- event list at `/events/` and one event page per event at `/events/{slug}/`,
+  grouped by authored sections when configured or by folder month otherwise
 
 Month grids render every item with:
 
@@ -336,6 +367,21 @@ configured it also includes event metadata ordered by newest start and then slug
       "start": "2024-05-28 09:00",
       "end": "2024-06-05 18:30",
       "description": "Hiking around Chamonix.",
+      "sections": [
+        {
+          "slug": "chamonix",
+          "title": "Chamonix",
+          "start": "2024-05-28 09:00",
+          "end": "2024-06-01 07:59"
+        },
+        {
+          "slug": "zermatt",
+          "title": "Zermatt",
+          "start": "2024-06-01 08:00",
+          "end": "2024-06-05 18:30",
+          "description": "The Matterhorn leg."
+        }
+      ],
       "count": 2
     }
   ]
@@ -367,9 +413,12 @@ Each `catalog/YYYY.json` shard contains ordered item records:
 ```
 
 Event fields are additive: `events` is omitted from the index and from every item
-when no events are configured. Older catalogs without the field load as having no
-events, and the schema version is unchanged. Item event slugs are sorted
-independently of the order events appear in `events.toml`.
+when no events are configured, and an event's `sections` array is omitted when it
+has no sections. Older catalogs without the fields load as having no events or
+sections, and the schema version is unchanged. Item event slugs are sorted
+independently of the order events appear in `events.toml`. Sections publish
+resolved `start`/`end` ranges rather than bookmark timestamps, so the server does
+not depend on the generator's bookmark derivation rule.
 
 Search (`search.html` + `assets/search.js`, both embedded in the server binary)
 loads the index and all year shards in parallel, then filters by text, type
