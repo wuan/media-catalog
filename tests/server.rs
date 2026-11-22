@@ -260,6 +260,9 @@ async fn renders_catalog_pages_and_hides_state() {
     assert!(html.contains("a.jpg"));
     assert!(html.contains("href=\"/media/2024/05/a.jpg\""));
     assert!(html.contains("loading=\"lazy\""));
+    assert!(html.contains("data-item-path=\"2024/05/a.jpg\""));
+    assert!(html.contains("data-kind=\"image\""));
+    assert_eq!(html.matches("/assets/viewer.js").count(), 1);
     assert!(html.contains("Video"));
     assert!(html.contains("1:05"));
 
@@ -272,12 +275,42 @@ async fn renders_catalog_pages_and_hides_state() {
     assert!(header_value(&headers, header::CONTENT_TYPE).starts_with("text/css"));
     let css = String::from_utf8_lossy(&body);
     assert!(css.contains(".site-header"));
+    assert!(css.contains(".viewer-stage"));
+    assert!(css.contains("prefers-reduced-motion"));
     assert!(!css.contains("obsolete css"));
 
     let (status, headers, body) = send(app.clone(), Method::GET, "/assets/search.js").await;
     assert_eq!(status, StatusCode::OK);
     assert!(header_value(&headers, header::CONTENT_TYPE).starts_with("text/javascript"));
     assert!(String::from_utf8_lossy(&body).contains("__mediaCatalogSearch"));
+
+    let (status, headers, body) = send(app.clone(), Method::GET, "/assets/viewer.js").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(header_value(&headers, header::CONTENT_TYPE).starts_with("text/javascript"));
+    assert!(String::from_utf8_lossy(&body).contains("__mediaCatalogViewer"));
+    let viewer_etag = header_value(&headers, header::ETAG).to_string();
+
+    let (status, headers, body) = send(app.clone(), Method::HEAD, "/assets/viewer.js").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty());
+    assert!(
+        header_value(&headers, header::CONTENT_LENGTH)
+            .parse::<usize>()
+            .unwrap()
+            > 0
+    );
+
+    let (status, _, _) = send_with(
+        app.clone(),
+        Method::GET,
+        "/assets/viewer.js",
+        vec![(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&viewer_etag).unwrap(),
+        )],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
 
     let (status, headers, body) = send(app.clone(), Method::GET, "/search.html").await;
     assert_eq!(status, StatusCode::OK);
@@ -924,13 +957,21 @@ async fn starts_without_a_catalog_and_recovers_when_one_appears() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(String::from_utf8_lossy(&body).contains("catalog unavailable"));
 
-    for path in ["/search.html", "/assets/site.css", "/assets/search.js"] {
+    for path in [
+        "/search.html",
+        "/assets/site.css",
+        "/assets/search.js",
+        "/assets/viewer.js",
+    ] {
         let (status, _, _) = send(app.clone(), Method::GET, path).await;
         assert_eq!(status, StatusCode::OK, "{path}");
     }
 
     let (_, _, body) = send(app.clone(), Method::GET, "/assets/search.js").await;
     assert!(String::from_utf8_lossy(&body).contains("catalog is not available yet"));
+
+    let (_, _, body) = send(app.clone(), Method::GET, "/assets/viewer.js").await;
+    assert!(String::from_utf8_lossy(&body).contains("__mediaCatalogViewer"));
 
     let (status, _, _) = send(app.clone(), Method::GET, "/catalog/index.json").await;
     assert_eq!(status, StatusCode::NOT_FOUND);

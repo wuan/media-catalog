@@ -80,6 +80,18 @@
     var link = document.createElement("a");
     link.className = "tile-link";
     link.href = item.media_url;
+    link.dataset.itemPath = item.path;
+    link.dataset.kind = item.kind;
+    link.dataset.captured = item.captured_at || "";
+    if (item.thumb_url) {
+      link.dataset.thumbUrl = item.thumb_url;
+    }
+    if (typeof item.width === "number") {
+      link.dataset.width = String(item.width);
+    }
+    if (typeof item.height === "number") {
+      link.dataset.height = String(item.height);
+    }
 
     var name = item.path.split("/").pop();
     var alt = name || ("Media item captured " + (item.captured_at || ""));
@@ -162,9 +174,20 @@
     document.getElementById("status").textContent =
       matches.length + " of " + items.length + " items";
 
-    var query = filtersToQuery(filters);
+    var params = new URLSearchParams(filtersToQuery(filters));
+    var item = new URLSearchParams(window.location.search).get("item");
+    if (item) {
+      params.set("item", item);
+    }
+    var query = params.toString();
     var next = window.location.pathname + (query ? "?" + query : "");
     window.history.replaceState(null, "", next);
+
+    document.dispatchEvent(
+      new CustomEvent("media-catalog:results-rendered", {
+        detail: { count: matches.length }
+      })
+    );
     return matches;
   }
 

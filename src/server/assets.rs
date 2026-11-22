@@ -7,6 +7,7 @@ use crate::render;
 
 const SITE_CSS: &str = include_str!("../../assets/site.css");
 const SEARCH_JS: &str = include_str!("../../assets/search.js");
+const VIEWER_JS: &str = include_str!("../../assets/viewer.js");
 
 pub async fn serve_search_shell(method: Method, headers: HeaderMap) -> Response {
     match render::render_search_shell() {
@@ -27,6 +28,15 @@ pub async fn serve_search_js(method: Method, headers: HeaderMap) -> Response {
         method,
         &headers,
         SEARCH_JS,
+        "text/javascript; charset=utf-8",
+    )
+}
+
+pub async fn serve_viewer_js(method: Method, headers: HeaderMap) -> Response {
+    embedded_response(
+        method,
+        &headers,
+        VIEWER_JS,
         "text/javascript; charset=utf-8",
     )
 }

@@ -71,7 +71,7 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 | `/events/{slug}/` | rendered event page with month sections; `404` for unknown slugs; `503` before publication |
 | `/{year}/`, `/{year}/{month}/` | rendered pages; `404` for unknown years/months; `503` before publication |
 | `/search.html` | embedded search shell, available without a catalog |
-| `/assets/site.css`, `/assets/search.js` | embedded assets, available without a catalog |
+| `/assets/site.css`, `/assets/search.js`, `/assets/viewer.js` | embedded assets, available without a catalog |
 | `/catalog/*` | published JSON from `data_root/catalog/`; `404` before publication |
 | `/thumbs/*` | generated thumbnails from `data_root/thumbs/` |
 | `/media/*` | read-only original stream |
@@ -206,6 +206,7 @@ curl -i http://127.0.0.1:8080/events/alps-2024/
 # embedded shell and assets
 curl -i http://127.0.0.1:8080/search.html
 curl -i http://127.0.0.1:8080/assets/search.js
+curl -i http://127.0.0.1:8080/assets/viewer.js
 
 # JSON
 curl -i http://127.0.0.1:8080/catalog/index.json

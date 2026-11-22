@@ -428,6 +428,60 @@ Without JavaScript, the page explains the limitation and links to the browsable
 year hierarchy. If catalog JSON cannot be loaded yet, the search page shows a
 clear catalog-unavailable message.
 
+## In-page media viewer
+
+`assets/viewer.js` (embedded in the server binary alongside `search.js`) turns
+the tiles on a month, event, or search page into an in-page album. A plain click
+or keyboard activation opens the item in a modal dialog instead of navigating
+away; modifier clicks, middle clicks, and new-tab gestures keep the original tile
+link behavior.
+
+- **Album scope:** tiles are collected from the live page in document order, so a
+  month page covers that month, a sectioned event page covers every authored
+  section and the Other bucket, and a search page covers the current filtered
+  results. Navigation stops at the first and last item.
+- **Navigation:** use the Previous/Next controls, the Left/Right arrow keys, or a
+  horizontal swipe while an image is at fit scale. Arrow keys keep navigating
+  while an image is zoomed.
+- **Images:** the thumbnail is shown while the original loads, each newly opened
+  item starts at fit scale, and pinch, wheel, double-tap/double-click, and
+  `+`/`-`/`0` zoom with panning clamped to the viewport. Zoom resets when
+  moving to another item, and adjacent images are preloaded after idle unless
+  the browser reports a data-saver preference.
+- **Videos:** videos play inline with native controls, the thumbnail as poster,
+  `playsinline`, and metadata-only preload. They never autoplay, stop and rewind
+  when you navigate away or close the viewer, and fall back to the caption and
+  original link when playback is unsupported. Arrow keys navigate unless the
+  video player itself owns focus, in which case the native player seeks.
+- **Deep links:** the open item is stored as `?item=<relative path>` on the
+  album URL. Opening, navigating, and closing use `history.replaceState`, so
+  browser Back does not step through images. Search filter parameters are
+  preserved alongside `item`; a stale item path opens nothing and leaves the
+  grid usable.
+- **Accessibility:** the viewer is a modal dialog with labelled controls, focus
+  containment, an announced current position, and reduced-motion styles.
+- **Fallback:** tile anchors stay regular links to `/media/`. If the viewer
+  script is unavailable or fails to initialize, tiles continue to open the
+  original file directly.
+
+Bearer-token deployments must rely on browser-compatible credentials for
+`/media/` subresources; the viewer does not add header-based fetching. See
+`docs/server.md` for asset routes and caching behavior.
+
+Browser verification checklist for the video and focus paths:
+
+- Open an image album, click a tile, and confirm the viewer opens in place.
+- Navigate with the buttons, arrow keys, and a touch swipe; confirm the first and
+  last items disable the matching direction.
+- Play a video, navigate away, and confirm audio stops; reopen and confirm it
+  starts paused.
+- Focus the video player and press Left/Right to confirm native seeking; move
+  focus off the player and confirm the arrows navigate again.
+- Close with the control, backdrop, and Escape and confirm focus returns to the
+  originating tile.
+- Reload a page with `?item=` and confirm the same item reopens; confirm Back
+  does not step through previously viewed images.
+
 JSON and rendered pages contain no build timestamps, so two runs over an
 unchanged archive produce byte-identical output.
 

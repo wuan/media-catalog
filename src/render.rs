@@ -95,13 +95,17 @@ struct MonthTemplate {
 
 struct TileView {
     media_url: String,
+    rel_path: String,
     thumb_url: String,
     thumb_available: bool,
     alt: String,
     name: String,
+    kind: &'static str,
     is_video: bool,
     duration_label: String,
     captured_label: String,
+    width: Option<u32>,
+    height: Option<u32>,
 }
 
 #[derive(Template)]
@@ -254,13 +258,17 @@ fn tile_from_item(item: &ItemView) -> TileView {
     };
     TileView {
         media_url: item.media_url.clone(),
+        rel_path: item.path.clone(),
         thumb_url: item.thumb_url.clone().unwrap_or_default(),
         thumb_available: item.thumb_available && item.thumb_url.is_some(),
         alt,
         name: item.name.clone(),
+        kind: item.kind.as_str(),
         is_video: item.kind == MediaKind::Video,
         duration_label: item.duration_ms.map(format_duration).unwrap_or_default(),
         captured_label: item.captured_at.clone(),
+        width: item.width,
+        height: item.height,
     }
 }
 
@@ -430,6 +438,56 @@ mod tests {
         assert!(html.contains("assets/search.js"));
     }
 
+    #[test]
+    fn tiles_expose_viewer_metadata() {
+        let catalog = event_catalog(
+            vec![
+                CatalogItemInput {
+                    kind: MediaKind::Video,
+                    duration_ms: Some(65_000),
+                    ..item("2024/05/clip.mp4", 2024, 5, "2024-05-01 10:00:00")
+                },
+                item("2024/05/a.jpg", 2024, 5, "2024-05-02 10:00:00"),
+            ],
+            vec![event_meta(
+                "trip",
+                "Trip",
+                "2024-05-01 00:00",
+                "2024-05-31 23:59",
+            )],
+        );
+
+        let month = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert!(month.contains("data-item-path=\"2024/05/a.jpg\""));
+        assert!(month.contains("data-kind=\"image\""));
+        assert!(month.contains("data-captured=\"2024-05-02 10:00:00\""));
+        assert!(month.contains("data-thumb-url=\"/thumbs/2024/05/a.jpg.webp?v=10-20\""));
+        assert!(month.contains("data-width=\"4000\""));
+        assert!(month.contains("data-height=\"3000\""));
+        assert!(month.contains("data-item-path=\"2024/05/clip.mp4\""));
+        assert!(month.contains("data-kind=\"video\""));
+
+        let event = render_event(&catalog, "trip").unwrap().unwrap();
+        assert!(event.contains("data-item-path=\"2024/05/clip.mp4\""));
+        assert!(event.contains("data-kind=\"video\""));
+        assert!(event.contains("data-width=\"4000\""));
+    }
+
+    #[test]
+    fn pages_load_the_viewer_script_once() {
+        let catalog = cross_month_catalog();
+        let month = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        let event = render_event(&catalog, "may-trip").unwrap().unwrap();
+        let search = render_search_shell().unwrap();
+        for (label, html) in [("month", month), ("event", event), ("search", search)] {
+            assert_eq!(
+                html.matches("/assets/viewer.js").count(),
+                1,
+                "{label} page must load the viewer once"
+            );
+        }
+    }
+
     fn event_meta(slug: &str, title: &str, start: &str, end: &str) -> EventMeta {
         EventMeta {
             slug: slug.to_string(),
@@ -562,7 +620,8 @@ mod tests {
         let algarve_heading = html.find("id=\"algarve\"").unwrap();
         assert!(lisbon_heading < lisbon_item && lisbon_item < algarve_heading);
         assert!(algarve_heading < algarve_item);
-        assert!(!html.contains("<script"));
+        assert_eq!(html.matches("/assets/viewer.js").count(), 1);
+        assert!(!html.contains("<script>"));
     }
 
     #[test]
@@ -688,7 +747,8 @@ mod tests {
             .expect("May item");
         assert!(june_item < may_item);
         assert_eq!(html.matches("loading=\"lazy\"").count(), 2);
-        assert!(!html.contains("<script"));
+        assert_eq!(html.matches("/assets/viewer.js").count(), 1);
+        assert!(!html.contains("<script>"));
     }
 
     #[test]
