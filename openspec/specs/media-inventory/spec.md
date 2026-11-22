@@ -33,7 +33,7 @@ The generator SHALL classify each discovered file as an image or a video based o
 - **THEN** it is skipped, reported in the run summary, and does not abort the build
 
 ### Requirement: Extract safe capture metadata
-The generator SHALL extract width, height, capture timestamp when available, and video duration; it SHALL fall back to the file modification time when no capture timestamp exists and SHALL NOT expose GPS or camera metadata in generated output.
+The generator SHALL extract width, height, capture timestamp when available, video duration, and camera model when available; it SHALL fall back to the file modification time when no capture timestamp exists and SHALL NOT expose GPS, location, serial numbers, or other camera details in generated output.
 
 #### Scenario: Photo with EXIF timestamp
 - **WHEN** a JPEG contains an EXIF capture timestamp
@@ -45,11 +45,19 @@ The generator SHALL extract width, height, capture timestamp when available, and
 
 #### Scenario: Video metadata
 - **WHEN** a video is probed successfully
-- **THEN** its duration and dimensions are recorded for display and thumbnail generation
+- **THEN** its duration, dimensions, and any available model tag are recorded for display and thumbnail generation
+
+#### Scenario: Photo with EXIF model
+- **WHEN** a JPEG contains a non-empty EXIF `Model` value
+- **THEN** that model is recorded for tile captions
+
+#### Scenario: Video with model tag
+- **WHEN** a video's probe output contains a non-empty model tag
+- **THEN** that model is recorded for tile captions
 
 #### Scenario: Privacy of metadata
-- **WHEN** a source photo contains GPS coordinates and camera details
-- **THEN** neither field appears in generated HTML or JSON
+- **WHEN** a source photo contains GPS coordinates, a serial number, and camera details
+- **THEN** GPS, location, serial numbers, and other camera details do not appear in generated HTML or JSON, while the camera model may appear in tile captions and item records
 
 ### Requirement: Order catalog items deterministically
 The generator SHALL present years, months, and items in reverse chronological order, ordering items within a month by capture timestamp and then by relative path so repeated runs produce the same order.
