@@ -1,0 +1,42 @@
+---
+source: src/json.rs
+expression: output.index
+---
+{
+  "schema_version": 1,
+  "total_items": 3,
+  "years": [
+    {
+      "year": 2024,
+      "count": 3,
+      "months": [
+        {
+          "month": 6,
+          "count": 2
+        },
+        {
+          "month": 5,
+          "count": 1
+        }
+      ],
+      "shard": "catalog/2024.json"
+    }
+  ],
+  "events": [
+    {
+      "slug": "june",
+      "title": "June",
+      "start": "2024-06-01 00:00",
+      "end": "2024-06-30 23:59",
+      "count": 2
+    },
+    {
+      "slug": "may-trip",
+      "title": "May trip",
+      "start": "2024-05-28 09:00",
+      "end": "2024-06-05 18:30",
+      "description": "A crossing event.",
+      "count": 2
+    }
+  ]
+}

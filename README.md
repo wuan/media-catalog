@@ -7,7 +7,8 @@ is the only runtime: it renders the browsable catalog pages from that JSON, serv
 the embedded search shell and assets, and streams originals from the media root.
 
 The catalog becomes usable as soon as `catalog/index.json` exists, even while
-thumbnails are still being generated.
+thumbnails are still being generated. Authored events can additionally group
+items across month boundaries without changing the `YYYY/MM` hierarchy.
 
 ## Requirements
 
@@ -77,7 +78,8 @@ cargo run --release --bin media-catalog-server -- \
 
 It listens on `127.0.0.1:8080` by default:
 
-- `/` → root years page rendered from JSON
+- `/` → root page rendered from JSON, with events above the year hierarchy
+- `/events/`, `/events/{slug}/` → rendered event list and event pages
 - `/{year}/`, `/{year}/{month}/` → rendered year and month pages
 - `/search.html`, `/assets/*` → embedded search shell, CSS, and JavaScript
 - `/catalog/*` → published JSON
@@ -108,6 +110,7 @@ reads `./media-catalog.toml` when that file exists.
 | `--quiet` | off | Suppress progress reporting on stderr. |
 | `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
 | `--config <path>` | `./media-catalog.toml` if present | TOML configuration file. |
+| `--events <path>` | `./events.toml` if present | Authored events content file. |
 
 Example `media-catalog.toml`:
 
@@ -178,6 +181,47 @@ GPS coordinates, camera make/model, and other private EXIF fields are never
 extracted or serialized into JSON or rendered pages. Thumbnails are re-encoded
 from pixels and therefore carry no source metadata.
 
+## Events
+
+Events are authored content, kept separate from deployment configuration in
+`events.toml`. The generator loads `./events.toml` when it exists; use
+`--events <path>` to load another file. The server never reads it.
+
+```toml
+[[events]]
+slug = "alps-2024"
+title = "Alps trip 2024"
+start = "2024-05-28 09:00"
+end = "2024-06-05 18:30"
+description = "Hiking around Chamonix."
+```
+
+- `slug`: stable URL segment using lowercase ASCII letters, digits, and single
+  hyphens; unique across the file. `/events/{slug}/` is the event page.
+- `title`: required non-empty display name.
+- `start`, `end`: inclusive timestamps in `YYYY-MM-DD HH:MM` form; `start` must
+  not be after `end`.
+- `description`: optional text displayed on the event page.
+
+An item belongs to an event when its effective capture timestamp, truncated to
+the minute, lies inside the inclusive range. The effective timestamp is the EXIF
+or video capture time, falling back to file modification time. Membership follows
+the timestamp, not the folder: an item stored under `2024/06` with a May capture
+time can appear in a May event while its year/month browsing remains `2024/06`.
+Overlapping events are allowed and an item may belong to several.
+
+The generator validates slugs, titles, timestamps, and ranges before scanning. A
+missing explicit `--events` path, duplicate slug, malformed timestamp, or reversed
+range fails the run before any work starts. A catalog without an events file
+publishes no event fields and remains byte-identical to a catalog built before
+event support.
+
+Event pages group items by folder month, newest month and newest item first.
+Month headings link to the normal `/YYYY/MM/` pages. The run summary reports each
+configured event and its matched item count; an event with more than 500 items
+produces a warning because a page that large is a signal to split the event or
+add a future month substructure.
+
 ## Thumbnails
 
 Every item gets one 512×512 WebP thumbnail at quality 80:
@@ -221,14 +265,17 @@ interrupted publication therefore leaves the previous complete catalog in place.
 
 The server keeps an immutable in-memory snapshot loaded from the index and its
 shards. It checks the index metadata on each catalog request and reloads when it
-changes. A reload that cannot read every referenced shard is discarded, so the
-previous snapshot keeps serving and visitors never see a partial catalog.
+changes. A reload that cannot read every referenced shard, or that contains
+duplicate or undeclared event slugs or event counts that disagree with shard
+membership, is discarded, so the previous snapshot keeps serving and visitors
+never see a partial catalog.
 
 Catalog pages are rendered per request with Askama:
 
 - root years index at `/`
 - months for a year at `/{year}/`
 - lazy-loaded item grid at `/{year}/{month}/`
+- event list at `/events/` and one month-grouped page per event at `/events/{slug}/`
 
 Month grids render every item with:
 
@@ -257,6 +304,8 @@ The generator and server have separate readiness:
 - `/` shows a bootstrap page stating that the catalog is not available yet.
 - `/{year}/` and `/{year}/{month}/` return `503` before publication and `404` for
   unknown years or months.
+- `/events/` and `/events/{slug}/` return `503` before publication; an event slug
+  absent from the catalog returns `404`.
 - `/catalog/*` returns `404` until JSON exists.
 - `/healthz` reports catalog readiness separately from media readiness.
 
@@ -265,18 +314,29 @@ without restarting the server.
 
 ## JSON catalog and search
 
-`catalog/index.json` lists years, counts, months, and shard paths:
+`catalog/index.json` lists years, counts, months, and shard paths. When events are
+configured it also includes event metadata ordered by newest start and then slug:
 
 ```json
 {
   "schema_version": 1,
-  "total_items": 3,
+  "total_items": 2,
   "years": [
     {
       "year": 2024,
       "count": 2,
       "months": [{ "month": 5, "count": 2 }],
       "shard": "catalog/2024.json"
+    }
+  ],
+  "events": [
+    {
+      "slug": "alps-2024",
+      "title": "Alps trip 2024",
+      "start": "2024-05-28 09:00",
+      "end": "2024-06-05 18:30",
+      "description": "Hiking around Chamonix.",
+      "count": 2
     }
   ]
 }
@@ -299,11 +359,17 @@ Each `catalog/YYYY.json` shard contains ordered item records:
       "duration_ms": null,
       "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=...",
       "media_url": "/media/2024/05/a.jpg",
-      "thumb_available": true
+      "thumb_available": true,
+      "events": ["alps-2024"]
     }
   ]
 }
 ```
+
+Event fields are additive: `events` is omitted from the index and from every item
+when no events are configured. Older catalogs without the field load as having no
+events, and the schema version is unchanged. Item event slugs are sorted
+independently of the order events appear in `events.toml`.
 
 Search (`search.html` + `assets/search.js`, both embedded in the server binary)
 loads the index and all year shards in parallel, then filters by text, type
@@ -433,5 +499,7 @@ process only new or changed files and are much faster.
 
 The summary reports scanned counts, new/changed/unchanged items, probes,
 thumbnails generated/skipped/failed/unsupported, JSON files written, deleted
-rows, pruned files, per-item errors, and elapsed time. Exit status is nonzero for
-configuration errors, any per-item failure, or a blocked mount-drop guard.
+rows, pruned files, per-item errors, elapsed time, and each configured event with
+its matched item count. Events that match more than 500 items add a warning.
+Exit status is nonzero for configuration errors, any per-item failure, or a
+blocked mount-drop guard.

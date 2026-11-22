@@ -60,6 +60,10 @@ pub struct Cli {
     /// Optional TOML configuration file. Defaults to ./media-catalog.toml when present.
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
+
+    /// Optional events content file. Defaults to ./events.toml when present.
+    #[arg(long, value_name = "PATH")]
+    pub events: Option<PathBuf>,
 }
 
 /// Optional TOML configuration. Values here are overridden by explicit CLI flags.
@@ -94,6 +98,8 @@ pub struct Config {
     pub dry_run: bool,
     pub quiet: bool,
     pub allow_mount_drop: bool,
+    /// Authored events file, or `None` when the catalog has no events.
+    pub events_file: Option<PathBuf>,
 }
 
 impl Config {
@@ -127,6 +133,7 @@ impl Config {
             dry_run: false,
             quiet: true,
             allow_mount_drop: false,
+            events_file: None,
         }
     }
 
@@ -171,6 +178,8 @@ impl Config {
         let quiet = cli.quiet || file.quiet.unwrap_or(false);
         let allow_mount_drop = cli.allow_mount_drop || file.allow_mount_drop.unwrap_or(false);
 
+        let events_file = resolve_events_path(cli.events.as_deref(), &cwd)?;
+
         let config = Self {
             media_root,
             data_root,
@@ -184,6 +193,7 @@ impl Config {
             dry_run,
             quiet,
             allow_mount_drop,
+            events_file,
         };
         config.validate()?;
         Ok(config)
@@ -273,6 +283,27 @@ fn load_file_config(explicit: Option<&Path>) -> Result<FileConfig> {
 /// Build state lives directly in the state root.
 fn state_db_for(state_root: &Path) -> PathBuf {
     state_root.join("state.sqlite")
+}
+
+/// Resolve the events content file: explicit paths must exist; the default
+/// `./events.toml` is loaded only when present.
+fn resolve_events_path(explicit: Option<&Path>, cwd: &Path) -> Result<Option<PathBuf>> {
+    match explicit {
+        Some(path) => {
+            let path = absolutize(cwd, path);
+            if !path.exists() {
+                bail!("events file not found: {}", path.display());
+            }
+            if !path.is_file() {
+                bail!("events path is not a file: {}", path.display());
+            }
+            Ok(Some(path))
+        }
+        None => {
+            let candidate = absolutize(cwd, Path::new("events.toml"));
+            Ok(candidate.is_file().then_some(candidate))
+        }
+    }
 }
 
 fn absolutize(cwd: &Path, path: &Path) -> PathBuf {
@@ -605,5 +636,39 @@ mod tests {
         assert_eq!(config.data_root, data);
         assert_eq!(config.state_root, state);
         assert_eq!(config.state_db, state.join("state.sqlite"));
+        assert!(config.events_file.is_none());
+    }
+
+    #[test]
+    fn events_file_defaults_to_events_toml_when_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("events.toml");
+        std::fs::write(&path, "").unwrap();
+        let resolved = resolve_events_path(None, temp.path()).unwrap();
+        assert_eq!(resolved.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn absent_default_events_file_is_optional() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_events_path(None, temp.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn explicit_events_file_is_used() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("custom.toml");
+        std::fs::write(&path, "").unwrap();
+        let resolved = resolve_events_path(Some(Path::new("custom.toml")), temp.path()).unwrap();
+        assert_eq!(resolved.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn missing_explicit_events_file_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let error = resolve_events_path(Some(Path::new("missing.toml")), temp.path()).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("events file not found"), "{message}");
+        assert!(message.contains("missing.toml"), "{message}");
     }
 }

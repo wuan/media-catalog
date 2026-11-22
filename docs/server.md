@@ -15,7 +15,9 @@ Browser
    v
 +--------------------------------------------------+
 | media-catalog-server                             |
-|  /                  -> render years from JSON    |
+|  /                  -> render years and events   |
+|  /events/           -> render event list         |
+|  /events/{slug}/    -> render event page         |
 |  /YYYY/             -> render months from JSON   |
 |  /YYYY/MM/          -> render item grid          |
 |  /search.html       -> embedded shell            |
@@ -64,7 +66,9 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 
 | Route | Behavior |
 | --- | --- |
-| `/` | rendered years index from JSON; bootstrap page before publication |
+| `/` | rendered years index from JSON, with an Events section above Years when configured; bootstrap page before publication |
+| `/events/` | rendered event list; empty list when no events are configured; `503` before publication |
+| `/events/{slug}/` | rendered event page with month sections; `404` for unknown slugs; `503` before publication |
 | `/{year}/`, `/{year}/{month}/` | rendered pages; `404` for unknown years/months; `503` before publication |
 | `/search.html` | embedded search shell, available without a catalog |
 | `/assets/site.css`, `/assets/search.js` | embedded assets, available without a catalog |
@@ -74,8 +78,12 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 | `/healthz` | `200` when catalog and media are ready, otherwise `503` with a detail line |
 
 - Dynamic routes accept only numeric four-digit years and two-digit months, and
-  are registered before the static fallback. Unknown/invalid segments return
-  `404`, never a directory listing.
+  are registered before the static fallback. Explicit `/events/...` routes are
+  registered ahead of the numeric routes so they never fall through to year
+  handling. Unknown/invalid segments return `404`, never a directory listing.
+- Event pages group items by folder month, newest month and newest item first;
+  month headings link to `/YYYY/MM/`. They reuse the same lazy tile markup and
+  remain usable without JavaScript.
 - `HEAD` returns headers without a body for catalog pages and embedded assets.
 - `Range: bytes=start-end`, `bytes=start-`, and `bytes=-suffix` return `206` with
   `Content-Range`; unsatisfiable ranges return `416`.
@@ -103,6 +111,9 @@ every shard it references. On each catalog request it checks the index metadata:
   snapshot
 - missing or unreadable shard → keep the previous snapshot and log the reload
   failure
+- duplicate event slugs, undeclared item event slugs, or declared event counts
+  that disagree with shard membership → keep the previous snapshot and log the
+  reload failure
 
 Publication order makes this safe: the generator writes shards first and
 `catalog/index.json` last. A visitor therefore never observes a partially
@@ -189,6 +200,8 @@ ffmpeg, a job queue, and cached output.
 curl -i http://127.0.0.1:8080/
 curl -i http://127.0.0.1:8080/2024/
 curl -i http://127.0.0.1:8080/2024/05/
+curl -i http://127.0.0.1:8080/events/
+curl -i http://127.0.0.1:8080/events/alps-2024/
 
 # embedded shell and assets
 curl -i http://127.0.0.1:8080/search.html

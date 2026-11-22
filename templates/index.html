@@ -12,6 +12,20 @@
     <nav><a href="/search.html">Search</a></nav>
   </header>
   <main>
+    {% if !events.is_empty() %}
+    <h1>Events</h1>
+    <ul class="event-list">
+      {% for event in events %}
+      <li>
+        <a href="{{ event.url }}">
+          <span class="event-title">{{ event.title }}</span>
+          <span class="range">{{ event.range }}</span>
+          <span class="count">{{ event.count }} items</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     <h1>Years</h1>
     {% if years.is_empty() %}
     <p class="empty">No media found yet.</p>

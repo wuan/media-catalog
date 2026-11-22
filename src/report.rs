@@ -7,6 +7,13 @@ pub struct ItemFailure {
     pub message: String,
 }
 
+/// One configured event and the number of items it matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventCount {
+    pub slug: String,
+    pub count: usize,
+}
+
 /// Counts and failures collected during a build.
 #[derive(Debug, Clone, Default)]
 pub struct RunSummary {
@@ -28,6 +35,10 @@ pub struct RunSummary {
     pub errors: Vec<ItemFailure>,
     pub unsupported: Vec<String>,
     pub mount_warning: Option<String>,
+    /// Per-event membership counts reported after publication.
+    pub event_counts: Vec<EventCount>,
+    /// Warnings for events beyond the supported curated size.
+    pub event_warnings: Vec<String>,
     pub blocked: bool,
     pub elapsed: Duration,
 }
@@ -75,6 +86,15 @@ impl RunSummary {
         if let Some(warning) = &self.mount_warning {
             lines.push(format!("Warning: {warning}"));
         }
+        if !self.event_counts.is_empty() {
+            lines.push(format!("Events: {}", self.event_counts.len()));
+            for event in &self.event_counts {
+                lines.push(format!("  - {}: {} items", event.slug, event.count));
+            }
+        }
+        for warning in &self.event_warnings {
+            lines.push(format!("Warning: {warning}"));
+        }
         lines.push(format!("Errors: {}", self.errors.len()));
         for failure in self.errors.iter().take(25) {
             lines.push(format!("  - {}: {}", failure.path, failure.message));
@@ -117,5 +137,30 @@ mod tests {
         assert!(rendered.contains("Removed state rows for 1 deleted items"));
         assert!(rendered.contains("Pruned 4 orphan thumbnails"));
         assert!(!rendered.to_ascii_lowercase().contains("pages"));
+    }
+
+    #[test]
+    fn summary_reports_event_counts_and_large_event_warnings() {
+        let summary = RunSummary {
+            event_counts: vec![
+                EventCount {
+                    slug: "trip".into(),
+                    count: 12,
+                },
+                EventCount {
+                    slug: "season".into(),
+                    count: 750,
+                },
+            ],
+            event_warnings: vec![
+                "event \"season\" matched 750 items (more than 500); consider splitting it".into(),
+            ],
+            ..RunSummary::default()
+        };
+        let rendered = summary.render();
+        assert!(rendered.contains("Events: 2"));
+        assert!(rendered.contains("- trip: 12 items"));
+        assert!(rendered.contains("- season: 750 items"));
+        assert!(rendered.contains("Warning: event \"season\" matched 750 items"));
     }
 }

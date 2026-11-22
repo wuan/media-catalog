@@ -1,4 +1,5 @@
 pub mod config;
+pub mod events;
 pub mod fingerprint;
 pub mod fsutil;
 pub mod json;
@@ -29,7 +30,7 @@ use crate::model::CatalogItemInput;
 use crate::paths::thumb_rel_path;
 use crate::probe::ProbeResult;
 use crate::progress::Progress;
-use crate::report::{ItemFailure, RunSummary};
+use crate::report::{EventCount, ItemFailure, RunSummary};
 use crate::scan::{is_decodable_extension, MediaKind, ScannedFile};
 use crate::state::{StateDb, ThumbStatus};
 use crate::thumbs::{ThumbError, ThumbInput};
@@ -78,10 +79,14 @@ struct ThumbOutcome {
 /// probe changed -> thumbnail changed -> publish JSON -> cleanup -> report.
 pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     config.validate()?;
+    let event_definitions = events::load_events(config.events_file.as_deref())?;
     probe::ensure_external_tools().context("configuration error")?;
     let progress = Progress::new(config.quiet);
     progress.detail(format!("Data root: {}", config.data_root.display()));
     progress.detail(format!("State root: {}", config.state_root.display()));
+    if let Some(path) = &config.events_file {
+        progress.detail(format!("Events: {}", path.display()));
+    }
 
     let started = Instant::now();
     let mut summary = RunSummary {
@@ -436,7 +441,9 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
         });
     }
 
-    let catalog = model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
+    let mut catalog =
+        model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
+    events::attach_events(&mut catalog, event_definitions)?;
 
     progress.phase("Publishing JSON catalog");
     summary.json_files_written = json::write_json(&config.data_root, &catalog)?;
@@ -444,6 +451,24 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
         "Published {} JSON files",
         summary.json_files_written
     ));
+
+    summary.event_counts = catalog
+        .events
+        .iter()
+        .map(|event| EventCount {
+            slug: event.slug.clone(),
+            count: event.item_count,
+        })
+        .collect();
+    for event in &catalog.events {
+        if let Some(warning) = events::large_event_warning(event) {
+            progress.phase(format!("Warning: {warning}"));
+            summary.event_warnings.push(warning);
+        }
+    }
+    if !catalog.events.is_empty() {
+        progress.phase(format!("Events: {} configured", catalog.events.len()));
+    }
 
     if summary.blocked {
         summary.deleted = 0;

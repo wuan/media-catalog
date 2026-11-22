@@ -1,6 +1,6 @@
 ---
 source: src/render.rs
-expression: "std::fs::read_to_string(public.join(\"index.html\")).unwrap()"
+expression: render_index(&catalog).unwrap()
 ---
 <!DOCTYPE html>
 <html lang="en">
@@ -16,6 +16,7 @@ expression: "std::fs::read_to_string(public.join(\"index.html\")).unwrap()"
     <nav><a href="/search.html">Search</a></nav>
   </header>
   <main>
+    
     <h1>Years</h1>
     
     <ul class="year-list">

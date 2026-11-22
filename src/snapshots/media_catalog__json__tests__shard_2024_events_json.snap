@@ -1,0 +1,56 @@
+---
+source: src/json.rs
+expression: "output.shards[&2024]"
+---
+{
+  "schema_version": 1,
+  "year": 2024,
+  "items": [
+    {
+      "path": "2024/06/outside.jpg",
+      "month": 6,
+      "kind": "image",
+      "captured_at": "2024-06-20 09:00:00",
+      "width": 4000,
+      "height": 3000,
+      "duration_ms": null,
+      "thumb_url": "/thumbs/2024/06/outside.jpg.webp?v=12-22",
+      "media_url": "/media/2024/06/outside.jpg",
+      "thumb_available": true,
+      "events": [
+        "june"
+      ]
+    },
+    {
+      "path": "2024/06/b.jpg",
+      "month": 6,
+      "kind": "image",
+      "captured_at": "2024-06-02 09:00:00",
+      "width": 4000,
+      "height": 3000,
+      "duration_ms": null,
+      "thumb_url": "/thumbs/2024/06/b.jpg.webp?v=11-21",
+      "media_url": "/media/2024/06/b.jpg",
+      "thumb_available": true,
+      "events": [
+        "june",
+        "may-trip"
+      ]
+    },
+    {
+      "path": "2024/05/a.jpg",
+      "month": 5,
+      "kind": "image",
+      "captured_at": "2024-05-30 10:11:12",
+      "width": 4000,
+      "height": 3000,
+      "duration_ms": null,
+      "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=10-20",
+      "media_url": "/media/2024/05/a.jpg",
+      "thumb_available": true,
+      "events": [
+        "may-trip"
+      ]
+    }
+  ]
+}

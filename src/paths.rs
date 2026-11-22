@@ -64,6 +64,11 @@ pub fn month_page_url(year: i32, month: u32) -> String {
     format!("/{year}/{month:02}/")
 }
 
+/// Root-relative navigation URL for an event page.
+pub fn event_page_url(slug: &str) -> String {
+    format!("/events/{slug}/")
+}
+
 /// Stem/name of an item for display.
 pub fn item_name(rel_path: &str) -> String {
     rel_path.rsplit('/').next().unwrap_or(rel_path).to_string()
@@ -119,5 +124,10 @@ mod tests {
     #[test]
     fn prefixes_with_trailing_slash_do_not_double_up() {
         assert_eq!(url_for("/media/", "2024/a.jpg"), "/media/2024/a.jpg");
+    }
+
+    #[test]
+    fn event_page_urls_use_the_events_prefix() {
+        assert_eq!(event_page_url("may-trip"), "/events/may-trip/");
     }
 }

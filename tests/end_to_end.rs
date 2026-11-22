@@ -128,6 +128,94 @@ async fn generator_output_is_served_end_to_end() {
 }
 
 #[tokio::test]
+async fn event_browsing_is_served_end_to_end() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/alpha.jpg",
+        Some(1),
+        Some("2024:05:30 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/06/beta.jpg",
+        Some(1),
+        Some("2024:06:02 09:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/06/outside.jpg",
+        Some(1),
+        Some("2024:06:20 09:00:00"),
+        false,
+    );
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "may-trip"
+title = "May trip"
+start = "2024-05-28 09:00"
+end = "2024-06-05 18:30"
+description = "A crossing event."
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path);
+    let outcome = run_with_config(config).unwrap();
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+    assert_eq!(outcome.summary.event_counts.len(), 1);
+    assert_eq!(outcome.summary.event_counts[0].slug, "may-trip");
+    assert_eq!(outcome.summary.event_counts[0].count, 2);
+    assert!(outcome.summary.event_warnings.is_empty());
+
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
+
+    let (status, _, body) = send(&app, Method::GET, "/events/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let list = html(&body);
+    assert!(list.contains("May trip"));
+    assert!(list.contains("2 items"));
+    assert!(list.contains("href=\"/events/may-trip/\""));
+
+    let (status, _, body) = send(&app, Method::GET, "/events/may-trip/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let event = html(&body);
+    assert!(event.find("June 2024").unwrap() < event.find("May 2024").unwrap());
+    assert!(event.contains("alpha.jpg"));
+    assert!(event.contains("beta.jpg"));
+    assert!(!event.contains("outside.jpg"));
+    assert!(event.contains("href=\"/2024/06/\""));
+    assert!(event.contains("href=\"/2024/05/\""));
+    assert!(event.contains("loading=\"lazy\""));
+
+    let (status, _, body) = send(&app, Method::GET, "/2024/05/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let may = html(&body);
+    assert!(may.contains("alpha.jpg"));
+    assert!(!may.contains("beta.jpg"));
+
+    let (status, _, body) = send(&app, Method::GET, "/2024/06/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let june = html(&body);
+    assert!(june.contains("beta.jpg"));
+    assert!(june.contains("outside.jpg"));
+    assert!(!june.contains("alpha.jpg"));
+
+    let (status, _, body) = send(&app, Method::GET, "/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let root = html(&body);
+    assert!(root.find("Events").unwrap() < root.find("Years").unwrap());
+    assert!(root.contains("href=\"/events/may-trip/\""));
+}
+
+#[tokio::test]
 async fn running_server_picks_up_a_catalog_update_without_restart() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/alpha.jpg", 24, 18, 1);

@@ -195,6 +195,12 @@ pub fn router_from_state(state: AppState) -> Router {
         .route("/search.html", get(assets::serve_search_shell))
         .route("/assets/site.css", get(assets::serve_site_css))
         .route("/assets/search.js", get(assets::serve_search_js))
+        // Explicit event routes are registered before the numeric year/month
+        // routes so `/events/` never falls through to `/{year}/`.
+        .route("/events", get(catalog::serve_events))
+        .route("/events/", get(catalog::serve_events))
+        .route("/events/{slug}", get(catalog::serve_event))
+        .route("/events/{slug}/", get(catalog::serve_event))
         // Dynamic catalog routes accept numeric segments in the handlers and are
         // registered before the static fallback.
         .route("/{year}", get(catalog::serve_year))

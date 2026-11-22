@@ -446,6 +446,58 @@ fn snapshot_files(
 }
 
 #[test]
+fn invalid_events_fail_before_scanning_and_write_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "bad"
+title = "Bad range"
+start = "2024-05-02 09:00"
+end = "2024-05-01 09:00"
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path);
+    let error = run_with_config(config).unwrap_err();
+    assert!(error.to_string().contains("after it ends"), "{error:#}");
+    assert!(!fixture.data.exists());
+    assert!(!fixture.state_db().exists());
+}
+
+#[test]
+fn catalogs_without_events_omit_event_fields_and_load_as_empty() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    fixture.write_image("2024/06/b.jpg", 20, 20, 2);
+
+    run_with_config(fixture.config()).unwrap();
+    let index_before = fixture.read_json("catalog/index.json");
+    let shard_2024_before = fixture.read_json("catalog/2024.json");
+    assert!(!index_before.contains("\"events\""));
+    assert!(!shard_2024_before.contains("\"events\""));
+
+    let catalog = json::load_catalog(&fixture.data.join("catalog")).unwrap();
+    assert!(catalog.events.is_empty());
+    for year in &catalog.years {
+        for month in &year.months {
+            for item in &month.items {
+                assert!(item.events.is_empty());
+            }
+        }
+    }
+
+    run_with_config(fixture.config()).unwrap();
+    assert_eq!(fixture.read_json("catalog/index.json"), index_before);
+    assert_eq!(fixture.read_json("catalog/2024.json"), shard_2024_before);
+}
+
+#[test]
 fn prune_never_touches_files_outside_the_thumbnail_tree() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);

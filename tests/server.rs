@@ -6,7 +6,7 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use axum::Router;
 use media_catalog::json;
-use media_catalog::model::{build_catalog, Catalog, CatalogItemInput};
+use media_catalog::model::{build_catalog, Catalog, CatalogItemInput, EventMeta};
 use media_catalog::scan::MediaKind;
 use media_catalog::server::{app_state, router, router_from_state, serve_listener, ServerConfig};
 use tempfile::TempDir;
@@ -128,6 +128,29 @@ fn write_catalog(data: &Path, catalog: &Catalog) {
         fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();
     }
     fs::write(catalog_dir.join("index.json"), output.index).unwrap();
+}
+
+fn event_catalog() -> Catalog {
+    let mut catalog = item_catalog(vec![
+        item("2024/05/a.jpg", MediaKind::Image),
+        CatalogItemInput {
+            month: 6,
+            ..item("2024/06/b.jpg", MediaKind::Image)
+        },
+    ]);
+    media_catalog::events::attach_events(
+        &mut catalog,
+        vec![EventMeta {
+            slug: "may-trip".into(),
+            title: "May trip".into(),
+            start: "2024-05-01 00:00".into(),
+            end: "2024-06-30 23:59".into(),
+            description: Some("A crossing event.".into()),
+            item_count: 0,
+        }],
+    )
+    .unwrap();
+    catalog
 }
 
 fn byte_pattern(size: usize) -> Vec<u8> {
@@ -259,6 +282,121 @@ async fn renders_catalog_pages_and_hides_state() {
         let (status, _, _) = send(app.clone(), Method::GET, path).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
+}
+
+#[tokio::test]
+async fn renders_event_routes_as_a_second_browsing_axis() {
+    let fixture = Fixture::new();
+    write_catalog(&fixture.data, &event_catalog());
+    let app = router(fixture.config()).unwrap();
+
+    let (status, _, body) = send(app.clone(), Method::GET, "/").await;
+    assert_eq!(status, StatusCode::OK);
+    let root = String::from_utf8_lossy(&body);
+    let events_heading = root.find("Events").expect("events section");
+    let years_heading = root.find("Years").expect("years section");
+    assert!(events_heading < years_heading);
+    assert!(root.contains("href=\"/events/may-trip/\""));
+
+    let (status, _, body) = send(app.clone(), Method::GET, "/events/").await;
+    assert_eq!(status, StatusCode::OK);
+    let list = String::from_utf8_lossy(&body);
+    assert!(list.contains("May trip"));
+    assert!(list.contains("2024-05-01 00:00 to 2024-06-30 23:59"));
+    assert!(list.contains("2 items"));
+
+    let (status, headers, body) = send(app.clone(), Method::GET, "/events/may-trip/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header_value(&headers, header::CACHE_CONTROL), "no-cache");
+    let event = String::from_utf8_lossy(&body);
+    assert!(event.contains("<h1>May trip</h1>"));
+    // Event month groups stay folder-authoritative and newest first.
+    assert!(event.find("June 2024").unwrap() < event.find("May 2024").unwrap());
+    assert!(event.contains("href=\"/2024/06/\""));
+    assert!(event.contains("href=\"/2024/05/\""));
+
+    // Event routes take precedence over the numeric year/month routes.
+    let (status, _, _) = send(app.clone(), Method::GET, "/events").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _, _) = send(app.clone(), Method::GET, "/events/unknown/").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Existing year/month pages are unchanged by event configuration.
+    let (status, _, body) = send(app.clone(), Method::GET, "/2024/05/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("a.jpg"));
+    let (status, _, body) = send(app.clone(), Method::GET, "/2024/06/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("b.jpg"));
+
+    let (_, headers, _) = send(app.clone(), Method::GET, "/events/").await;
+    let list_etag = header_value(&headers, header::ETAG).to_string();
+    let (status, _, body) = send_with(
+        app.clone(),
+        Method::GET,
+        "/events/",
+        vec![(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&list_etag).unwrap(),
+        )],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
+    assert!(body.is_empty());
+
+    let (_, headers, _) = send(app.clone(), Method::GET, "/events/may-trip/").await;
+    let event_etag = header_value(&headers, header::ETAG).to_string();
+    let (status, _, body) = send_with(
+        app.clone(),
+        Method::GET,
+        "/events/may-trip/",
+        vec![(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&event_etag).unwrap(),
+        )],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_MODIFIED);
+    assert!(body.is_empty());
+
+    let (status, headers, body) = send(app, Method::HEAD, "/events/may-trip/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty());
+    assert!(
+        header_value(&headers, header::CONTENT_LENGTH)
+            .parse::<usize>()
+            .unwrap()
+            > 0
+    );
+}
+
+#[tokio::test]
+async fn event_list_is_empty_without_configured_events() {
+    let fixture = Fixture::new();
+    let app = router(fixture.config()).unwrap();
+
+    let (status, _, body) = send(app, Method::GET, "/events/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("No events configured."));
+}
+
+#[tokio::test]
+async fn event_routes_return_503_before_publication() {
+    let fixture = Fixture::new();
+    let late_data = fixture._temp.path().join("late-event-data");
+    let app = router(ServerConfig::new(&late_data, &fixture.media)).unwrap();
+
+    for path in ["/events/", "/events/may-trip/"] {
+        let (status, headers, _) = send(app.clone(), Method::GET, path).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        assert_eq!(header_value(&headers, header::CACHE_CONTROL), "no-store");
+    }
+
+    write_catalog(&late_data, &event_catalog());
+    let (status, _, body) = send(app.clone(), Method::GET, "/events/may-trip/").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&body).contains("May trip"));
 }
 
 #[tokio::test]

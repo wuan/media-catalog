@@ -1,14 +1,15 @@
 use anyhow::{Context, Result};
 use askama::Template;
 
-use crate::model::{Catalog, ItemView};
-use crate::paths::{month_page_url, year_page_url};
+use crate::model::{Catalog, EventView, ItemView};
+use crate::paths::{event_page_url, month_page_url, year_page_url};
 use crate::scan::MediaKind;
 
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
     years: Vec<YearLink>,
+    events: Vec<EventLink>,
     total_items: usize,
 }
 
@@ -16,6 +17,37 @@ struct YearLink {
     year: i32,
     count: usize,
     url: String,
+}
+
+#[derive(Template)]
+#[template(path = "events.html")]
+struct EventsTemplate {
+    events: Vec<EventLink>,
+}
+
+struct EventLink {
+    title: String,
+    range: String,
+    description: String,
+    count: usize,
+    url: String,
+}
+
+#[derive(Template)]
+#[template(path = "event.html")]
+struct EventTemplate {
+    title: String,
+    range: String,
+    description: String,
+    item_count: usize,
+    months: Vec<EventMonthSection>,
+}
+
+struct EventMonthSection {
+    label: String,
+    url: String,
+    count: usize,
+    items: Vec<TileView>,
 }
 
 #[derive(Template)]
@@ -57,7 +89,7 @@ struct TileView {
 #[template(path = "search.html")]
 struct SearchTemplate;
 
-/// Render the root years index.
+/// Render the root years index, including events when present.
 pub fn render_index(catalog: &Catalog) -> Result<String> {
     IndexTemplate {
         years: catalog
@@ -69,10 +101,60 @@ pub fn render_index(catalog: &Catalog) -> Result<String> {
                 url: year_page_url(year.year),
             })
             .collect(),
+        events: catalog.events.iter().map(event_link).collect(),
         total_items: catalog.item_count,
     }
     .render()
     .context("rendering root index")
+}
+
+/// Render the canonical event list at `/events/`.
+pub fn render_events(catalog: &Catalog) -> Result<String> {
+    EventsTemplate {
+        events: catalog.events.iter().map(event_link).collect(),
+    }
+    .render()
+    .context("rendering event list")
+}
+
+/// Render one event page, or `None` when the slug is not declared.
+pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
+    let Some(event) = catalog.event(slug) else {
+        return Ok(None);
+    };
+    let html = EventTemplate {
+        title: event.title.clone(),
+        range: event_range(event),
+        description: event.description.clone().unwrap_or_default(),
+        item_count: event.item_count,
+        months: event
+            .months
+            .iter()
+            .map(|month| EventMonthSection {
+                label: month.label.clone(),
+                url: month_page_url(month.year, month.month),
+                count: month.items.len(),
+                items: month.items.iter().map(tile_from_item).collect(),
+            })
+            .collect(),
+    }
+    .render()
+    .with_context(|| format!("rendering event {}", event.slug))?;
+    Ok(Some(html))
+}
+
+fn event_link(event: &EventView) -> EventLink {
+    EventLink {
+        title: event.title.clone(),
+        range: event_range(event),
+        description: event.description.clone().unwrap_or_default(),
+        count: event.item_count,
+        url: event_page_url(&event.slug),
+    }
+}
+
+fn event_range(event: &EventView) -> String {
+    format!("{} to {}", event.start, event.end)
 }
 
 /// Render the months index for a year, or `None` when the catalog has no such year.
@@ -153,7 +235,7 @@ pub fn format_duration(duration_ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{build_catalog, CatalogItemInput};
+    use crate::model::{build_catalog, CatalogItemInput, EventMeta};
 
     fn item(path: &str, year: i32, month: u32, captured_at: &str) -> CatalogItemInput {
         CatalogItemInput {
@@ -302,5 +384,154 @@ mod tests {
         assert!(html.contains("<noscript>"));
         assert!(html.contains("href=\"/\""));
         assert!(html.contains("assets/search.js"));
+    }
+
+    fn event_meta(slug: &str, title: &str, start: &str, end: &str) -> EventMeta {
+        EventMeta {
+            slug: slug.to_string(),
+            title: title.to_string(),
+            start: start.to_string(),
+            end: end.to_string(),
+            description: None,
+            item_count: 0,
+        }
+    }
+
+    fn event_catalog(items: Vec<CatalogItemInput>, events: Vec<EventMeta>) -> Catalog {
+        let mut catalog = build_catalog(items, "/media", "/thumbs");
+        crate::events::attach_events(&mut catalog, events).unwrap();
+        catalog
+    }
+
+    fn cross_month_catalog() -> Catalog {
+        event_catalog(
+            vec![
+                item("2024/05/a.jpg", 2024, 5, "2024-05-30 10:00:00"),
+                item("2024/06/b.jpg", 2024, 6, "2024-06-02 10:00:00"),
+            ],
+            vec![EventMeta {
+                slug: "may-trip".into(),
+                title: "May trip".into(),
+                start: "2024-05-28 09:00".into(),
+                end: "2024-06-05 18:30".into(),
+                description: Some("A crossing event.".into()),
+                item_count: 0,
+            }],
+        )
+    }
+
+    #[test]
+    fn root_and_event_list_show_events_above_years() {
+        let catalog = cross_month_catalog();
+        let root = render_index(&catalog).unwrap();
+        let events_heading = root.find("<h1>Events</h1>").expect("events heading");
+        let years_heading = root.find("<h1>Years</h1>").expect("years heading");
+        assert!(events_heading < years_heading);
+        assert!(root.contains("href=\"/events/may-trip/\""));
+        assert!(root.contains("May trip"));
+
+        let list = render_events(&catalog).unwrap();
+        assert!(list.contains("May trip"));
+        assert!(list.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
+        assert!(list.contains("2 items"));
+        assert!(list.contains("href=\"/events/may-trip/\""));
+        assert!(list.contains("A crossing event."));
+    }
+
+    #[test]
+    fn empty_event_list_renders_without_error() {
+        let catalog = build_catalog(vec![], "/media", "/thumbs");
+        let html = render_events(&catalog).unwrap();
+        assert!(html.contains("No events configured."));
+    }
+
+    #[test]
+    fn snapshot_event_page() {
+        let html = render_event(&cross_month_catalog(), "may-trip")
+            .unwrap()
+            .unwrap();
+        insta::assert_snapshot!("event_may_trip", html);
+    }
+
+    #[test]
+    fn event_page_groups_months_newest_first_and_links_month_pages() {
+        let catalog = cross_month_catalog();
+        let html = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(html.contains("<h1>May trip</h1>"));
+        assert!(html.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
+        assert!(html.contains("A crossing event."));
+
+        let june = html.find("June 2024").expect("June heading");
+        let may = html.find("May 2024").expect("May heading");
+        assert!(june < may);
+        assert!(html.contains("href=\"/2024/06/\""));
+        assert!(html.contains("href=\"/2024/05/\""));
+
+        let june_item = html
+            .find("href=\"/media/2024/06/b.jpg\"")
+            .expect("June item");
+        let may_item = html
+            .find("href=\"/media/2024/05/a.jpg\"")
+            .expect("May item");
+        assert!(june_item < may_item);
+        assert_eq!(html.matches("loading=\"lazy\"").count(), 2);
+        assert!(!html.contains("<script"));
+    }
+
+    #[test]
+    fn event_page_reuses_tile_presentation_and_escapes_metadata() {
+        let catalog = event_catalog(
+            vec![
+                CatalogItemInput {
+                    kind: MediaKind::Video,
+                    duration_ms: Some(65_000),
+                    ..item("2024/05/clip.mp4", 2024, 5, "2024-05-30 10:00:00")
+                },
+                CatalogItemInput {
+                    thumb_available: false,
+                    thumb_version: None,
+                    ..item(
+                        "2024/05/<script>alert(1).jpg",
+                        2024,
+                        5,
+                        "2024-05-30 11:00:00",
+                    )
+                },
+            ],
+            vec![event_meta(
+                "trip",
+                "Trip",
+                "2024-05-01 00:00",
+                "2024-05-31 23:59",
+            )],
+        );
+        let html = render_event(&catalog, "trip").unwrap().unwrap();
+        assert!(html.contains("Video"));
+        assert!(html.contains("1:05"));
+        assert!(html.contains("class=\"placeholder\""));
+        assert!(!html.contains("<script>alert(1)"));
+        assert!(html.contains("href=\"/media/2024/05/%3Cscript%3Ealert(1).jpg\""));
+    }
+
+    #[test]
+    fn empty_event_renders_a_summary_and_empty_state() {
+        let catalog = event_catalog(
+            vec![item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")],
+            vec![event_meta(
+                "empty",
+                "Empty trip",
+                "2024-06-01 00:00",
+                "2024-06-30 23:59",
+            )],
+        );
+        let html = render_event(&catalog, "empty").unwrap().unwrap();
+        assert!(html.contains("<h1>Empty trip</h1>"));
+        assert!(html.contains("No items fall within this event."));
+    }
+
+    #[test]
+    fn unknown_event_slug_has_no_page() {
+        let catalog = cross_month_catalog();
+        assert!(render_event(&catalog, "missing").unwrap().is_none());
     }
 }

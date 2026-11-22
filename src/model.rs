@@ -28,6 +28,10 @@ pub struct CatalogItemInput {
 pub struct ItemView {
     pub path: String,
     pub name: String,
+    /// Folder year. Kept in the model so event month groups can address
+    /// `/YYYY/MM/` pages even though shard records only store the month.
+    #[serde(skip)]
+    pub year: i32,
     pub month: u32,
     pub kind: MediaKind,
     pub captured_at: String,
@@ -37,6 +41,36 @@ pub struct ItemView {
     pub thumb_url: Option<String>,
     pub media_url: String,
     pub thumb_available: bool,
+    /// Event slugs this item belongs to, sorted independently of config order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
+}
+
+/// Authored event metadata shared by the generator and the server.
+///
+/// `start` and `end` are canonical `YYYY-MM-DD HH:MM` strings, so lexical order
+/// matches chronological order. `item_count` is filled from membership by the
+/// generator and validated against the shards by the server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventMeta {
+    pub slug: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub description: Option<String>,
+    pub item_count: usize,
+}
+
+/// One event and its matching items grouped by folder month.
+#[derive(Debug, Clone)]
+pub struct EventView {
+    pub slug: String,
+    pub title: String,
+    pub start: String,
+    pub end: String,
+    pub description: Option<String>,
+    pub item_count: usize,
+    pub months: Vec<MonthView>,
 }
 
 /// One month of items.
@@ -62,6 +96,8 @@ pub struct YearView {
 pub struct Catalog {
     pub years: Vec<YearView>,
     pub item_count: usize,
+    /// Events ordered by newest start and then slug.
+    pub events: Vec<EventView>,
 }
 
 impl Catalog {
@@ -74,6 +110,10 @@ impl Catalog {
             .months
             .iter()
             .find(|view| view.month == month)
+    }
+
+    pub fn event(&self, slug: &str) -> Option<&EventView> {
+        self.events.iter().find(|view| view.slug == slug)
     }
 }
 
@@ -119,12 +159,14 @@ pub fn build_catalog(
                 .trim()
                 .to_string(),
             path: item.rel_path,
+            year: item.year,
             month: item.month,
             kind: item.kind,
             width: item.width,
             height: item.height,
             duration_ms: item.duration_ms,
             thumb_available: available,
+            events: Vec::new(),
         };
         by_year
             .entry(item.year)
@@ -165,6 +207,7 @@ pub fn build_catalog(
     Catalog {
         years,
         item_count: total,
+        events: Vec::new(),
     }
 }
 

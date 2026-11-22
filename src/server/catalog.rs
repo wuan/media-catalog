@@ -219,6 +219,54 @@ pub async fn serve_month(
     }
 }
 
+/// Render the canonical event list. Returns `503` before publication.
+pub async fn serve_events(
+    State(state): State<AppState>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    if !matches!(method, Method::GET | Method::HEAD) {
+        return method_not_allowed();
+    }
+
+    let Some(snapshot) = state.catalog.current().await else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "catalog unavailable");
+    };
+
+    match render::render_events(&snapshot.catalog) {
+        Ok(html) => html_page(&method, html, "events", &snapshot, &headers),
+        Err(error) => render_error(error),
+    }
+}
+
+/// Render one event page, or `404` for an undeclared slug.
+pub async fn serve_event(
+    State(state): State<AppState>,
+    method: Method,
+    headers: HeaderMap,
+    Path(slug): Path<String>,
+) -> Response {
+    if !matches!(method, Method::GET | Method::HEAD) {
+        return method_not_allowed();
+    }
+
+    let Some(snapshot) = state.catalog.current().await else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "catalog unavailable");
+    };
+
+    match render::render_event(&snapshot.catalog, &slug) {
+        Ok(Some(html)) => html_page(
+            &method,
+            html,
+            &format!("events/{slug}"),
+            &snapshot,
+            &headers,
+        ),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "not found"),
+        Err(error) => render_error(error),
+    }
+}
+
 fn parse_year(value: &str) -> Option<i32> {
     if value.len() != 4 || !value.chars().all(|c| c.is_ascii_digit()) {
         return None;
@@ -307,7 +355,7 @@ fn bootstrap_page(method: &Method) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{build_catalog, CatalogItemInput};
+    use crate::model::{build_catalog, CatalogItemInput, EventMeta};
     use crate::scan::MediaKind;
 
     fn item(path: &str, year: i32, month: u32) -> CatalogItemInput {
@@ -334,6 +382,26 @@ mod tests {
             std::fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();
         }
         std::fs::write(catalog_dir.join("index.json"), output.index).unwrap();
+    }
+
+    fn event_catalog(count: usize) -> Catalog {
+        let items = (0..count)
+            .map(|index| item(&format!("2024/05/{index}.jpg"), 2024, 5))
+            .collect();
+        let mut catalog = build_catalog(items, "/media", "/thumbs");
+        crate::events::attach_events(
+            &mut catalog,
+            vec![EventMeta {
+                slug: "trip".into(),
+                title: "Trip".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+            }],
+        )
+        .unwrap();
+        catalog
     }
 
     #[tokio::test]
@@ -390,5 +458,37 @@ mod tests {
         let snapshot = store.current().await.unwrap();
         assert_eq!(snapshot.catalog.item_count, 1);
         assert!(snapshot.catalog.year(2025).is_none());
+    }
+
+    #[tokio::test]
+    async fn keeps_the_previous_snapshot_when_event_data_is_inconsistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = CatalogStore::new(temp.path().to_path_buf());
+
+        write_catalog(temp.path(), &event_catalog(2));
+        let snapshot = store.current().await.unwrap();
+        assert_eq!(snapshot.catalog.item_count, 2);
+        assert_eq!(snapshot.catalog.events.len(), 1);
+        let first_id = snapshot.id;
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let second = event_catalog(3);
+        let output = crate::json::render_json(&second).unwrap();
+        let mut index = crate::json::parse_index(&output.index).unwrap();
+        index.events[0].count += 1;
+        let catalog_dir = temp.path().join("catalog");
+        for (year, shard) in &output.shards {
+            std::fs::write(catalog_dir.join(format!("{year}.json")), shard).unwrap();
+        }
+        std::fs::write(
+            catalog_dir.join("index.json"),
+            serde_json::to_string_pretty(&index).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = store.current().await.unwrap();
+        assert_eq!(snapshot.id, first_id);
+        assert_eq!(snapshot.catalog.item_count, 2);
+        assert_eq!(snapshot.catalog.events[0].item_count, 2);
     }
 }

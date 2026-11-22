@@ -62,6 +62,7 @@ fn help_starts_and_documents_flags() {
         "--dry-run",
         "--quiet",
         "--allow-mount-drop",
+        "--events",
     ] {
         assert!(stdout.contains(flag), "help missing {flag}: {stdout}");
     }
