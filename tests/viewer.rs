@@ -73,4 +73,5 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["placeholderTall"]["width"], 600.0);
     assert_eq!(result["placeholderTall"]["height"], 600.0);
     assert_eq!(result["placeholderMissing"], Value::Null);
+    assert_eq!(result["originalDelay"], 300);
 }

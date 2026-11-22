@@ -7,6 +7,9 @@
   var SWIPE_MIN = 40;
   var SWIPE_RATIO = 0.12;
   var RESULTS_EVENT = "media-catalog:results-rendered";
+  // Wait this long on an item before fetching its original, so holding an
+  // arrow key to browse only loads thumbnails for the items passed over.
+  var ORIGINAL_DELAY_MS = 300;
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -156,7 +159,8 @@
     mediaKind: "image",
     media: null,
     pendingItem: null,
-    preloadTimer: null
+    originalTimer: null,
+    originalLoader: null
   };
 
   var dialog = null;
@@ -418,6 +422,7 @@
   function showItem() {
     var item = state.items[state.index];
     resetZoom();
+    cancelOriginal();
     teardownVideo();
     error.hidden = true;
     measureStage();
@@ -442,7 +447,11 @@
     zoomInButton.disabled = item.kind === "video";
     zoomOutButton.disabled = item.kind === "video";
     resetButton.disabled = item.kind === "video";
-    preloadNeighbours();
+    if (item.kind !== "image") {
+      scheduleOriginal(function () {
+        preloadNeighbours();
+      });
+    }
   }
 
   function renderImage(item) {
@@ -471,7 +480,37 @@
 
     image.addEventListener("load", measureFit);
 
+    if (item.thumbUrl) {
+      scheduleOriginal(function () {
+        loadOriginal(item, image);
+      });
+    } else {
+      scheduleOriginal(function () {
+        preloadNeighbours();
+      });
+    }
+
+    if (image.complete) {
+      measureFit();
+    }
+  }
+
+  function scheduleOriginal(callback) {
+    state.originalTimer = window.setTimeout(function () {
+      state.originalTimer = null;
+      callback();
+    }, ORIGINAL_DELAY_MS);
+  }
+
+  function loadOriginal(item, image) {
     var original = new Image();
+    var settle = function () {
+      if (state.originalLoader !== original) {
+        return;
+      }
+      state.originalLoader = null;
+      preloadNeighbours();
+    };
     original.onload = function () {
       if (state.media !== image) {
         return;
@@ -481,11 +520,25 @@
       image.style.height = "";
       image.src = item.mediaUrl;
       image.classList.add("is-original");
+      settle();
     };
+    original.onerror = settle;
+    state.originalLoader = original;
     original.src = item.mediaUrl;
+  }
 
-    if (image.complete) {
-      measureFit();
+  function cancelOriginal() {
+    if (state.originalTimer) {
+      clearTimeout(state.originalTimer);
+      state.originalTimer = null;
+    }
+    var loader = state.originalLoader;
+    state.originalLoader = null;
+    if (loader) {
+      // Dropping the source lets the browser abort a still-running download.
+      loader.onload = null;
+      loader.onerror = null;
+      loader.removeAttribute("src");
     }
   }
 
@@ -817,6 +870,7 @@
     }
     var opener = state.opener;
     var lastItem = state.items[state.index];
+    cancelOriginal();
     teardownVideo();
     state.open = false;
     state.opener = null;
@@ -847,19 +901,12 @@
   }
 
   function preloadNeighbours() {
-    if (state.preloadTimer) {
-      clearTimeout(state.preloadTimer);
-      state.preloadTimer = null;
-    }
     var connection = navigator.connection || {};
-    if (connection.saveData) {
+    if (connection.saveData || !state.open) {
       return;
     }
-    state.preloadTimer = window.setTimeout(function () {
-      state.preloadTimer = null;
-      preloadNeighbour(state.index - 1);
-      preloadNeighbour(state.index + 1);
-    }, 250);
+    preloadNeighbour(state.index - 1);
+    preloadNeighbour(state.index + 1);
   }
 
   function preloadNeighbour(index) {
@@ -1000,6 +1047,7 @@
     MIN_ZOOM: MIN_ZOOM,
     MAX_ZOOM: MAX_ZOOM,
     DOUBLE_TAP_ZOOM: DOUBLE_TAP_ZOOM,
+    ORIGINAL_DELAY_MS: ORIGINAL_DELAY_MS,
     clamp: clamp,
     clampZoom: clampZoom,
     clampPan: clampPan,

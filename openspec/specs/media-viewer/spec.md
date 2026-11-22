@@ -88,11 +88,23 @@ The viewer SHALL provide previous and next navigation through keyboard, on-scree
 
 ### Requirement: Present images with pan and zoom
 
-The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents.
+The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL defer requesting the original until the item has been shown for a short delay, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents.
 
 #### Scenario: Original image
 - **WHEN** an image item opens
 - **THEN** the thumbnail is shown while the original loads and the original replaces it when available
+
+#### Scenario: Original loads after a short dwell
+- **WHEN** an image item with a thumbnail opens
+- **THEN** the viewer shows the thumbnail immediately and only requests the original once the item has stayed open for a short delay (300 ms)
+
+#### Scenario: Rapid browsing skips originals
+- **WHEN** the visitor moves past an image item before the delay elapses, for example by holding an arrow key
+- **THEN** the viewer does not request that item's original, cancels any original download still in progress for it, and does not preload its neighbours
+
+#### Scenario: Neighbour preloading follows the original
+- **WHEN** the current item's original has finished loading or failed
+- **THEN** the viewer preloads the originals of the adjacent image items unless the browser requests reduced data usage
 
 #### Scenario: Thumbnail matches the cropped region of the fitted box
 - **WHEN** an image item with known upright width and height opens and its thumbnail is shown while the original loads

@@ -65,7 +65,8 @@ const result = {
   fitMissing: api.fittedBox(0, 0, 1000, 800),
   placeholderWide: api.placeholderBox(4000, 3000, 1000, 800),
   placeholderTall: api.placeholderBox(3000, 4000, 1000, 800),
-  placeholderMissing: api.placeholderBox(0, 0, 1000, 800)
+  placeholderMissing: api.placeholderBox(0, 0, 1000, 800),
+  originalDelay: api.ORIGINAL_DELAY_MS
 };
 
 console.log(JSON.stringify(result));
