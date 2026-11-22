@@ -60,6 +60,10 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["swipeSmall"], false);
     assert_eq!(result["tileName"], "a.jpg");
     assert_eq!(result["tileCaptured"], "2024-05-01 10:00:00");
+    assert_eq!(result["tileModel"], "iPhone 15 Pro");
+    assert_eq!(result["tileCaption"], "2024-05-01 10:00:00 · iPhone 15 Pro");
+    assert_eq!(result["bareTileModel"], "");
+    assert_eq!(result["bareTileCaption"], "2024-05-01 10:00:00");
     assert_eq!(result["tileAlt"], "a.jpg");
     assert_eq!(result["tileWidth"], 4000.0);
     assert_eq!(result["tileHeight"], 3000.0);

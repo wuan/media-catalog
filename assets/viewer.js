@@ -111,6 +111,7 @@
       }
     }
     var nameNode = element.querySelector(".name");
+    var modelNode = element.querySelector(".model");
     var name = nameNode ? nameNode.textContent : path.split("/").pop();
     var image = element.querySelector("img");
     var placeholder = element.querySelector(".placeholder");
@@ -125,6 +126,7 @@
       path: path,
       kind: element.getAttribute("data-kind") || "image",
       captured: element.getAttribute("data-captured") || "",
+      model: modelNode ? modelNode.textContent.trim() : "",
       thumbUrl: element.getAttribute("data-thumb-url") || "",
       width: width > 0 ? width : null,
       height: height > 0 ? height : null,
@@ -168,7 +170,6 @@
   var stage = null;
   var wrap = null;
   var position = null;
-  var title = null;
   var captured = null;
   var error = null;
   var prevButton = null;
@@ -192,7 +193,7 @@
     dialog = document.createElement("dialog");
     dialog.className = "viewer";
     dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", "viewer-title");
+    dialog.setAttribute("aria-labelledby", "viewer-captured");
     dialog.setAttribute("aria-describedby", "viewer-caption");
 
     frame = document.createElement("div");
@@ -240,17 +241,14 @@
     var caption = document.createElement("div");
     caption.className = "viewer-caption";
     caption.id = "viewer-caption";
-    title = document.createElement("p");
-    title.className = "viewer-title";
-    title.id = "viewer-title";
     captured = document.createElement("p");
     captured.className = "viewer-captured";
+    captured.id = "viewer-captured";
     error = document.createElement("p");
     error.className = "viewer-error";
     error.hidden = true;
     error.textContent =
       "This item cannot be played here. Use the original link to open it.";
-    caption.appendChild(title);
     caption.appendChild(captured);
     caption.appendChild(error);
 
@@ -419,6 +417,10 @@
     updateUrl(state.items[index].path);
   }
 
+  function captionText(item) {
+    return item.model ? item.captured + " · " + item.model : item.captured;
+  }
+
   function showItem() {
     var item = state.items[state.index];
     resetZoom();
@@ -435,8 +437,7 @@
 
     position.textContent =
       "Item " + (state.index + 1) + " of " + state.items.length;
-    title.textContent = item.name;
-    captured.textContent = item.captured;
+    captured.textContent = captionText(item);
     originalLink.href = item.mediaUrl;
     originalLink.setAttribute(
       "aria-label",
@@ -1059,6 +1060,7 @@
     swipeThreshold: swipeThreshold,
     isSwipe: isSwipe,
     tileFromElement: tileFromElement,
+    captionText: captionText,
     fittedBox: fittedBox,
     placeholderBox: placeholderBox
   };

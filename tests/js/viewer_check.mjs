@@ -26,11 +26,17 @@ const fakeTile = {
       "data-height": "3000"
     }[name] || null;
   },
-  querySelector() {
-    return null;
+  querySelector(selector) {
+    return selector === ".model" ? { textContent: " iPhone 15 Pro " } : null;
   }
 };
 const tile = api.tileFromElement(fakeTile);
+const bareTile = api.tileFromElement({
+  getAttribute: fakeTile.getAttribute,
+  querySelector() {
+    return null;
+  }
+});
 
 const result = {
   item: api.parseItemParam("?q=alpha&item=2024/05/a.jpg"),
@@ -57,6 +63,10 @@ const result = {
   swipeSmall: api.isSwipe(30, 0, 200),
   tileName: tile.name,
   tileCaptured: tile.captured,
+  tileModel: tile.model,
+  tileCaption: api.captionText(tile),
+  bareTileModel: bareTile.model,
+  bareTileCaption: api.captionText(bareTile),
   tileAlt: tile.alt,
   tileWidth: tile.width,
   tileHeight: tile.height,
