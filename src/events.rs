@@ -373,7 +373,7 @@ pub fn build_event_views(catalog: &Catalog, events: &[EventMeta]) -> Result<Vec<
         let mut months = Vec::new();
         for year in &catalog.years {
             for month in &year.months {
-                let items = month
+                let mut items = month
                     .items
                     .iter()
                     .filter(|item| item.events.iter().any(|slug| slug == &event.slug))
@@ -382,6 +382,11 @@ pub fn build_event_views(catalog: &Catalog, events: &[EventMeta]) -> Result<Vec<
                 if items.is_empty() {
                     continue;
                 }
+                items.sort_by(|left, right| {
+                    left.captured_at
+                        .cmp(&right.captured_at)
+                        .then_with(|| left.path.cmp(&right.path))
+                });
                 months.push(MonthView {
                     year: year.year,
                     month: month.month,
@@ -402,11 +407,16 @@ pub fn build_event_views(catalog: &Catalog, events: &[EventMeta]) -> Result<Vec<
             );
         }
 
-        let items = months
+        let mut items = months
             .iter()
             .flat_map(|month| month.items.iter())
             .cloned()
             .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.captured_at
+                .cmp(&right.captured_at)
+                .then_with(|| left.path.cmp(&right.path))
+        });
         let sections = event
             .sections
             .iter()
@@ -780,15 +790,15 @@ mod tests {
         assert_eq!(
             paths(&view.sections[1].items),
             vec![
-                "2024/05/second.jpg".to_string(),
-                "2024/05/boundary.jpg".to_string()
+                "2024/05/boundary.jpg".to_string(),
+                "2024/05/second.jpg".to_string()
             ]
         );
         assert_eq!(
             paths(&view.other_items),
             vec![
-                "2024/05/gap.jpg".to_string(),
-                "2024/05/before.jpg".to_string()
+                "2024/05/before.jpg".to_string(),
+                "2024/05/gap.jpg".to_string()
             ]
         );
 
@@ -1006,7 +1016,7 @@ mod tests {
             .iter()
             .map(|item| item.path.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(june, vec!["2024/06/c.jpg", "2024/06/d.jpg"]);
+        assert_eq!(june, vec!["2024/06/d.jpg", "2024/06/c.jpg"]);
 
         // Config order never leaks into item slug lists.
         let older = catalog.event("older").unwrap();
