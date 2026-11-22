@@ -4,3 +4,8 @@
 /media/
 *.snap.new
 .envrc
+
+.agents
+.claude
+.vibe
+.opencode
