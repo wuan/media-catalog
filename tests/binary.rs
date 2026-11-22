@@ -8,6 +8,10 @@ fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_media-catalog")
 }
 
+fn server_binary() -> &'static str {
+    env!("CARGO_BIN_EXE_media-catalog-server")
+}
+
 #[test]
 fn restricted_path_produces_a_configuration_error_and_nonzero_exit() {
     let fixture = Fixture::new();
@@ -78,6 +82,66 @@ fn help_starts_and_documents_flags() {
         !stdout.contains("./events.toml"),
         "help still documents the implicit events default: {stdout}"
     );
+}
+
+#[test]
+fn server_help_documents_shared_configuration_flags() {
+    let output = Command::new(server_binary())
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for flag in [
+        "--config",
+        "--bind",
+        "--max-streams",
+        "--data-root",
+        "--media-root",
+    ] {
+        assert!(stdout.contains(flag), "help missing {flag}: {stdout}");
+    }
+}
+
+#[test]
+fn server_missing_roots_name_flags_and_keys() {
+    let fixture = Fixture::new();
+    let output = Command::new(server_binary())
+        .current_dir(fixture.root())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--data-root"), "stderr was: {stderr}");
+    assert!(stderr.contains("data_root"), "stderr was: {stderr}");
+
+    let output = Command::new(server_binary())
+        .args(["--data-root", fixture.data.to_str().unwrap()])
+        .current_dir(fixture.root())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--media-root"), "stderr was: {stderr}");
+    assert!(stderr.contains("media_root"), "stderr was: {stderr}");
+}
+
+#[test]
+fn server_missing_config_file_exits_nonzero_naming_it() {
+    let fixture = Fixture::new();
+    let missing = fixture.root().join("missing.toml");
+    let output = Command::new(server_binary())
+        .args(["--config", missing.to_str().unwrap()])
+        .current_dir(fixture.root())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("configuration file not found"),
+        "stderr was: {stderr}"
+    );
+    assert!(stderr.contains("missing.toml"), "stderr was: {stderr}");
 }
 
 #[test]

@@ -67,7 +67,9 @@ pub struct Cli {
     pub events: Option<PathBuf>,
 }
 
-/// Optional TOML configuration. Values here are overridden by explicit CLI flags.
+/// Optional TOML configuration shared by both binaries. Values here are
+/// overridden by explicit CLI flags; keys owned by the other binary are parsed
+/// and ignored.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FileConfig {
@@ -83,6 +85,38 @@ pub struct FileConfig {
     pub quiet: Option<bool>,
     pub allow_mount_drop: Option<bool>,
     pub events_file: Option<PathBuf>,
+    /// Socket address for the runtime server. Ignored by the generator.
+    pub bind: Option<String>,
+    /// Maximum concurrent server media streams. Ignored by the generator.
+    pub max_streams: Option<usize>,
+}
+
+impl FileConfig {
+    /// Load the shared configuration file. An explicit path must exist;
+    /// otherwise `./media-catalog.toml` is used when present.
+    pub fn load(explicit: Option<&Path>) -> Result<Self> {
+        let path = match explicit {
+            Some(path) => {
+                if !path.exists() {
+                    bail!("configuration file not found: {}", path.display());
+                }
+                Some(path.to_path_buf())
+            }
+            None => {
+                let candidate = PathBuf::from("media-catalog.toml");
+                candidate.exists().then_some(candidate)
+            }
+        };
+
+        let Some(path) = path else {
+            return Ok(Self::default());
+        };
+
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("reading configuration file {}", path.display()))?;
+        toml::from_str(&text)
+            .with_context(|| format!("parsing configuration file {}", path.display()))
+    }
 }
 
 /// Fully resolved and validated configuration.
@@ -107,7 +141,7 @@ pub struct Config {
 impl Config {
     /// Resolve CLI flags over an optional TOML file and validate the result.
     pub fn load(cli: Cli) -> Result<Self> {
-        let file_config = load_file_config(cli.config.as_deref())?;
+        let file_config = FileConfig::load(cli.config.as_deref())?;
         let cores = std::thread::available_parallelism()
             .map(|value| value.get())
             .unwrap_or(1);
@@ -258,29 +292,6 @@ impl Config {
     pub fn state_db(&self) -> &Path {
         &self.state_db
     }
-}
-
-fn load_file_config(explicit: Option<&Path>) -> Result<FileConfig> {
-    let path = match explicit {
-        Some(path) => {
-            if !path.exists() {
-                bail!("configuration file not found: {}", path.display());
-            }
-            Some(path.to_path_buf())
-        }
-        None => {
-            let candidate = PathBuf::from("media-catalog.toml");
-            candidate.exists().then_some(candidate)
-        }
-    };
-
-    let Some(path) = path else {
-        return Ok(FileConfig::default());
-    };
-
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("reading configuration file {}", path.display()))?;
-    toml::from_str(&text).with_context(|| format!("parsing configuration file {}", path.display()))
 }
 
 /// Build state lives directly in the state root.
@@ -474,15 +485,53 @@ mod tests {
             "media_root = \"./media\"\ndata_root = \"./data\"\nstate_root = \"./state\"\njobs = 3\n",
         )
         .unwrap();
-        let file = load_file_config(Some(&path)).unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
         assert_eq!(file.media_root, Some(PathBuf::from("./media")));
         assert_eq!(file.data_root, Some(PathBuf::from("./data")));
         assert_eq!(file.state_root, Some(PathBuf::from("./state")));
         assert_eq!(file.jobs, Some(3));
 
         std::fs::write(&path, "media_root = \"./media\"\nnot_a_flag = true\n").unwrap();
-        let error = load_file_config(Some(&path)).unwrap_err();
+        let error = FileConfig::load(Some(&path)).unwrap_err();
         assert!(format!("{error:#}").contains("unknown field"));
+    }
+
+    #[test]
+    fn parses_server_keys_from_the_shared_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "media_root = \"./media\"\nbind = \"0.0.0.0:9090\"\nmax_streams = 3\n",
+        )
+        .unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
+        assert_eq!(file.bind.as_deref(), Some("0.0.0.0:9090"));
+        assert_eq!(file.max_streams, Some(3));
+    }
+
+    #[test]
+    fn generator_resolves_when_the_file_contains_server_keys() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            format!(
+                "media_root = \"{}\"\ndata_root = \"{}\"\nstate_root = \"{}\"\nbind = \"127.0.0.1:9000\"\nmax_streams = 2\n",
+                media.display(),
+                temp.path().join("data").display(),
+                temp.path().join("state").display()
+            ),
+        )
+        .unwrap();
+
+        let file = FileConfig::load(Some(&path)).unwrap();
+        let config = Config::resolve(Cli::parse_from(["media-catalog"]), file, 2).expect("resolve");
+        assert_eq!(config.media_root, media);
+        assert_eq!(config.data_root, temp.path().join("data"));
+        assert_eq!(config.state_root, temp.path().join("state"));
     }
 
     #[test]
@@ -494,7 +543,7 @@ mod tests {
             "media_root = \"./media\"\ncatalog_root = \"./catalog\"\n",
         )
         .unwrap();
-        let error = load_file_config(Some(&path)).unwrap_err();
+        let error = FileConfig::load(Some(&path)).unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("unknown field"), "error was: {message}");
         assert!(message.contains("catalog_root"), "error was: {message}");
@@ -687,7 +736,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let file = load_file_config(Some(&path)).unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
         let config = Config::resolve(Cli::parse_from(["media-catalog"]), file, 2).unwrap();
         assert_eq!(config.events_file.as_deref(), Some(events.as_path()));
     }

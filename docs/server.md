@@ -42,6 +42,30 @@ Only the original media needs to live on the NAS.
 cargo build --release --bin media-catalog-server
 
 export MEDIA_CATALOG_TOKEN='choose-a-long-random-value' # optional
+./target/release/media-catalog-server --config /etc/media-catalog/media-catalog.toml
+```
+
+The server reads the same `media-catalog.toml` as the generator. A shared file
+can hold the deployment settings for both binaries:
+
+```toml
+media_root = "/Volumes/media/photos"
+data_root = "/Users/andi/.media-catalog/data"
+state_root = "/Users/andi/.media-catalog/state"
+bind = "127.0.0.1:8080"
+max_streams = 8
+```
+
+`media-catalog-server` resolves `--data-root`, `--media-root`, `--bind`, and
+`--max-streams` from the flag first, then the matching TOML key, then the
+built-in default (`127.0.0.1:8080` and `8`). Storage roots have no default. If
+`--config` is omitted, the server reads `./media-catalog.toml` from the working
+directory when present; otherwise it uses flags and defaults. Relative paths in
+the file resolve against the working directory, not the file's directory.
+
+Explicit flags still work and override the file:
+
+```sh
 ./target/release/media-catalog-server \
   --data-root "$HOME/.media-catalog/data" \
   --media-root /Volumes/media/photos \
@@ -54,8 +78,9 @@ generator publishes `catalog/index.json`. The media root remains required becaus
 `/media/` depends on it. The service binds to loopback by default. Add
 `--bind 0.0.0.0:8080` or a Tailscale address only when you intend to expose it.
 
-The access token is read from `MEDIA_CATALOG_TOKEN`, never from the command line.
-If the variable is unset or empty, access control is disabled.
+The access token is read from `MEDIA_CATALOG_TOKEN`, never from the command line
+or the configuration file. If the variable is unset or empty, access control is
+disabled.
 
 ```sh
 curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
@@ -163,6 +188,11 @@ sudo chmod 0600 /etc/media-catalog/server.env
 ```ini
 EnvironmentFile=/etc/media-catalog/server.env
 ```
+
+Systemd and launchd do not guarantee the project directory as the working
+directory, so pass `--config /etc/media-catalog/media-catalog.toml` (absolute)
+when the service reads the shared file. The example unit and plist still use
+explicit root and bind flags and remain valid; flags override the file.
 
 A launchd example lives at `docs/deploy/com.example.media-catalog-server.plist`
 for macOS. Adjust the paths, install it under `~/Library/LaunchAgents/`, and load

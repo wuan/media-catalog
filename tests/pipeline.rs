@@ -586,6 +586,37 @@ end = "2024-06-05 18:30"
 }
 
 #[test]
+fn generator_ignores_server_keys_in_media_catalog_toml() {
+    use clap::Parser;
+    use media_catalog::config::{Cli, Config};
+
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    let config_path = fixture.root().join("media-catalog.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "media_root = \"{}\"\ndata_root = \"{}\"\nstate_root = \"{}\"\nbind = \"127.0.0.1:8080\"\nmax_streams = 2\njobs = 2\nquiet = true\n",
+            fixture.media.display(),
+            fixture.data.display(),
+            fixture.state.display()
+        ),
+    )
+    .unwrap();
+
+    let cli = Cli::parse_from(["media-catalog", "--config", config_path.to_str().unwrap()]);
+    let config = Config::load(cli).unwrap();
+    let outcome = run_with_config(config).unwrap();
+    assert_eq!(outcome.summary.scanned, 1);
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+    assert!(fixture.data_path("catalog/index.json").exists());
+}
+
+#[test]
 fn catalogs_without_events_omit_event_fields_and_load_as_empty() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);

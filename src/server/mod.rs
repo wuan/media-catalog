@@ -23,8 +23,13 @@ use tokio::sync::Semaphore;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
+use crate::config::FileConfig;
 use catalog::CatalogStore;
 use support::{error_response, text_response};
+
+/// Loopback address used when neither flags nor the configuration file set one.
+const DEFAULT_BIND: &str = "127.0.0.1:8080";
+const DEFAULT_MAX_STREAMS: usize = 8;
 
 /// Runtime configuration for the read-only server.
 #[derive(Debug, Clone)]
@@ -42,12 +47,45 @@ impl ServerConfig {
         Self {
             data_root: data_root.into(),
             media_root: media_root.into(),
-            bind: "127.0.0.1:8080"
+            bind: DEFAULT_BIND
                 .parse()
                 .expect("the default bind address is valid"),
             token: None,
-            max_streams: 8,
+            max_streams: DEFAULT_MAX_STREAMS,
         }
+    }
+
+    /// Resolve server settings from CLI flags first, then the shared TOML
+    /// file, then built-in defaults. Paths stay as configured; `validate`
+    /// canonicalizes them against the working directory.
+    pub fn resolve(cli: ServeCli, file: FileConfig) -> Result<Self> {
+        let data_root = cli.data_root.or(file.data_root).ok_or_else(|| {
+            anyhow::anyhow!("--data-root is required (or set data_root in media-catalog.toml)")
+        })?;
+        let media_root = cli.media_root.or(file.media_root).ok_or_else(|| {
+            anyhow::anyhow!("--media-root is required (or set media_root in media-catalog.toml)")
+        })?;
+
+        let bind = match cli.bind.or(file.bind) {
+            Some(value) => value.parse::<SocketAddr>().with_context(|| {
+                format!(
+                    "invalid bind address {value:?}: --bind or bind in media-catalog.toml must be a socket address such as 127.0.0.1:8080"
+                )
+            })?,
+            None => DEFAULT_BIND.parse().expect("the default bind address is valid"),
+        };
+        let max_streams = cli
+            .max_streams
+            .or(file.max_streams)
+            .unwrap_or(DEFAULT_MAX_STREAMS);
+
+        Ok(Self {
+            data_root,
+            media_root,
+            bind,
+            token: None,
+            max_streams,
+        })
     }
 
     /// Canonicalize and validate the roots before serving. The data root may
@@ -55,7 +93,7 @@ impl ServerConfig {
     /// required because `/media/` depends on it.
     pub fn validate(self) -> Result<Self> {
         if self.max_streams == 0 {
-            bail!("--max-streams must be at least 1");
+            bail!("--max-streams must be at least 1 (or set max_streams in media-catalog.toml)");
         }
 
         let data_root = match std::fs::canonicalize(&self.data_root) {
@@ -112,37 +150,49 @@ impl ServerConfig {
 )]
 pub struct ServeCli {
     /// Root for published catalog data. Contains `catalog/` and `thumbs/`.
+    /// Overrides `data_root` in the shared configuration file.
     #[arg(long, value_name = "PATH")]
-    pub data_root: PathBuf,
+    pub data_root: Option<PathBuf>,
 
     /// Root of the read-only media archive.
+    /// Overrides `media_root` in the shared configuration file.
     #[arg(long, value_name = "PATH")]
-    pub media_root: PathBuf,
+    pub media_root: Option<PathBuf>,
 
-    /// Address to listen on. Defaults to loopback only.
-    #[arg(long, default_value = "127.0.0.1:8080", value_name = "ADDR")]
-    pub bind: SocketAddr,
+    /// Address to listen on. Overrides `bind` in the shared configuration file.
+    /// Defaults to loopback only.
+    #[arg(long, value_name = "ADDR")]
+    pub bind: Option<String>,
 
     /// Maximum concurrent `/media/` streams.
-    #[arg(long, default_value_t = 8, value_name = "N")]
-    pub max_streams: usize,
+    /// Overrides `max_streams` in the shared configuration file. Defaults to 8.
+    #[arg(long, value_name = "N")]
+    pub max_streams: Option<usize>,
+
+    /// Optional TOML configuration file. Defaults to ./media-catalog.toml when present.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
 }
 
 impl ServeCli {
-    /// Build the server configuration and read the access token from
-    /// `MEDIA_CATALOG_TOKEN` rather than the command line.
-    pub fn into_config(self) -> ServerConfig {
-        let token = std::env::var("MEDIA_CATALOG_TOKEN")
-            .ok()
-            .filter(|value| !value.is_empty());
-        ServerConfig {
-            data_root: self.data_root,
-            media_root: self.media_root,
-            bind: self.bind,
-            token,
-            max_streams: self.max_streams,
-        }
+    /// Load the shared configuration file, resolve the server settings, and
+    /// read the access token from `MEDIA_CATALOG_TOKEN` rather than the command
+    /// line.
+    pub fn into_config(self) -> Result<ServerConfig> {
+        let file = FileConfig::load(self.config.as_deref())?;
+        let mut config = ServerConfig::resolve(self, file)?;
+        config.token = token_from_env();
+        Ok(config)
     }
+}
+
+/// Access control is enabled only by a non-empty `MEDIA_CATALOG_TOKEN`.
+fn token_from_env() -> Option<String> {
+    normalize_token(std::env::var("MEDIA_CATALOG_TOKEN").ok())
+}
+
+fn normalize_token(value: Option<String>) -> Option<String> {
+    value.filter(|token| !token.is_empty())
 }
 
 #[derive(Clone)]
@@ -388,8 +438,12 @@ async fn wait_for_signal() {
 mod tests {
     use super::*;
 
+    fn empty_cli() -> ServeCli {
+        ServeCli::try_parse_from(["media-catalog-server"]).unwrap()
+    }
+
     #[test]
-    fn cli_defaults_to_loopback() {
+    fn resolved_defaults_to_loopback_and_eight_streams() {
         let cli = ServeCli::try_parse_from([
             "media-catalog-server",
             "--data-root",
@@ -398,17 +452,175 @@ mod tests {
             "/tmp/media",
         ])
         .unwrap();
-        assert!(cli.bind.ip().is_loopback());
-        assert_eq!(cli.max_streams, 8);
+        let config = ServerConfig::resolve(cli, FileConfig::default()).unwrap();
+        assert!(config.bind.ip().is_loopback());
+        assert_eq!(config.bind.port(), 8080);
+        assert_eq!(config.max_streams, 8);
     }
 
     #[test]
     fn rejects_missing_data_root() {
-        let error =
-            ServeCli::try_parse_from(["media-catalog-server", "--media-root", "/tmp/media"])
-                .unwrap_err();
+        let cli = ServeCli::try_parse_from(["media-catalog-server", "--media-root", "/tmp/media"])
+            .unwrap();
+        let error = ServerConfig::resolve(cli, FileConfig::default()).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("--data-root"), "error was: {message}");
+        assert!(message.contains("data_root"), "error was: {message}");
+    }
+
+    #[test]
+    fn rejects_missing_media_root() {
+        let cli =
+            ServeCli::try_parse_from(["media-catalog-server", "--data-root", "/tmp/data"]).unwrap();
+        let error = ServerConfig::resolve(cli, FileConfig::default()).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("--media-root"), "error was: {message}");
+        assert!(message.contains("media_root"), "error was: {message}");
+    }
+
+    #[test]
+    fn file_roots_are_used_when_flags_are_absent() {
+        let file = FileConfig {
+            media_root: Some(PathBuf::from("/srv/media")),
+            data_root: Some(PathBuf::from("/srv/data")),
+            bind: Some("0.0.0.0:9000".to_string()),
+            max_streams: Some(2),
+            ..FileConfig::default()
+        };
+        let config = ServerConfig::resolve(empty_cli(), file).unwrap();
+        assert_eq!(config.media_root, PathBuf::from("/srv/media"));
+        assert_eq!(config.data_root, PathBuf::from("/srv/data"));
+        assert_eq!(config.bind, "0.0.0.0:9000".parse().unwrap());
+        assert_eq!(config.max_streams, 2);
+    }
+
+    #[test]
+    fn cli_values_override_the_file() {
+        let file = FileConfig {
+            media_root: Some(PathBuf::from("/srv/media")),
+            data_root: Some(PathBuf::from("/srv/data")),
+            bind: Some("0.0.0.0:9000".to_string()),
+            max_streams: Some(2),
+            ..FileConfig::default()
+        };
+        let cli = ServeCli::try_parse_from([
+            "media-catalog-server",
+            "--media-root",
+            "/cli/media",
+            "--data-root",
+            "/cli/data",
+            "--bind",
+            "127.0.0.1:7000",
+            "--max-streams",
+            "4",
+        ])
+        .unwrap();
+        let config = ServerConfig::resolve(cli, file).unwrap();
+        assert_eq!(config.media_root, PathBuf::from("/cli/media"));
+        assert_eq!(config.data_root, PathBuf::from("/cli/data"));
+        assert_eq!(config.bind, "127.0.0.1:7000".parse().unwrap());
+        assert_eq!(config.max_streams, 4);
+    }
+
+    #[test]
+    fn invalid_file_bind_names_flag_and_key() {
+        let file = FileConfig {
+            media_root: Some(PathBuf::from("/srv/media")),
+            data_root: Some(PathBuf::from("/srv/data")),
+            bind: Some("not-an-address".to_string()),
+            ..FileConfig::default()
+        };
+        let error = ServerConfig::resolve(empty_cli(), file).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("--bind"), "error was: {message}");
+        assert!(message.contains("bind"), "error was: {message}");
+        assert!(message.contains("not-an-address"), "error was: {message}");
+    }
+
+    #[test]
+    fn invalid_cli_bind_names_flag_and_key() {
+        let cli = ServeCli::try_parse_from([
+            "media-catalog-server",
+            "--media-root",
+            "/srv/media",
+            "--data-root",
+            "/srv/data",
+            "--bind",
+            "not-an-address",
+        ])
+        .unwrap();
+        let error = ServerConfig::resolve(cli, FileConfig::default()).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("--bind"), "error was: {message}");
+        assert!(
+            message.contains("media-catalog.toml"),
+            "error was: {message}"
+        );
+    }
+
+    #[test]
+    fn zero_stream_limit_names_flag_and_key_before_binding() {
+        let file = FileConfig {
+            media_root: Some(PathBuf::from("/srv/media")),
+            data_root: Some(PathBuf::from("/srv/data")),
+            max_streams: Some(0),
+            ..FileConfig::default()
+        };
+        let config = ServerConfig::resolve(empty_cli(), file).unwrap();
+        let error = config.validate().unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("--max-streams"), "error was: {message}");
+        assert!(message.contains("max_streams"), "error was: {message}");
+    }
+
+    #[test]
+    fn configured_state_root_is_never_opened() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let state = temp.path().join("state-does-not-exist");
+        let file = FileConfig {
+            media_root: Some(media.clone()),
+            data_root: Some(temp.path().join("data")),
+            state_root: Some(state.clone()),
+            bind: Some("127.0.0.1:9000".to_string()),
+            max_streams: Some(2),
+            ..FileConfig::default()
+        };
+
+        let config = ServerConfig::resolve(empty_cli(), file)
+            .unwrap()
+            .validate()
+            .unwrap();
+        assert_eq!(config.media_root, std::fs::canonicalize(&media).unwrap());
+        assert_eq!(
+            config.data_root,
+            crate::config::normalize_lexically(&temp.path().join("data"))
+        );
+        assert!(!state.exists());
+    }
+
+    #[test]
+    fn token_is_only_from_a_non_empty_environment_value() {
+        assert_eq!(
+            normalize_token(Some("secret".to_string())),
+            Some("secret".to_string())
+        );
+        assert_eq!(normalize_token(Some(String::new())), None);
+        assert_eq!(normalize_token(None), None);
+    }
+
+    #[test]
+    fn missing_explicit_config_file_names_the_path() {
+        let missing = "/definitely/missing/media-catalog.toml";
+        let cli = ServeCli::try_parse_from(["media-catalog-server", "--config", missing]).unwrap();
+        let error = cli.into_config().unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("configuration file not found"),
+            "error was: {message}"
+        );
+        assert!(message.contains(missing), "error was: {message}");
     }
 
     #[test]

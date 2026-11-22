@@ -93,14 +93,17 @@ Later generator runs process only new or changed files.
 
 ## Configuration
 
-CLI flags override an optional TOML file. If `--config` is omitted, the generator
-reads `./media-catalog.toml` when that file exists.
+`media-catalog` and `media-catalog-server` read the same optional TOML file. CLI
+flags override file values, and file values override built-in defaults where a
+default exists. If `--config` is omitted, each binary reads
+`./media-catalog.toml` when that file exists. Relative paths in the file resolve
+against the process working directory, not the directory containing the file.
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--media-root <path>` | required | Root of the read-only `YYYY/MM` archive. |
 | `--data-root <path>` | required | Root for published `catalog/` and `thumbs/`. |
-| `--state-root <path>` | required | Root for `state.sqlite` and `build.lock`. |
+| `--state-root <path>` | required (generator) | Root for `state.sqlite` and `build.lock`. |
 | `--media-url-prefix <path>` | `/media` | URL prefix for original media links. |
 | `--thumb-url-prefix <path>` | `/thumbs` | URL prefix for thumbnail links. |
 | `--jobs <n>` | `min(4, CPU cores)` | Parallel thumbnail/probe workers. |
@@ -109,7 +112,9 @@ reads `./media-catalog.toml` when that file exists.
 | `--dry-run` | off | Scan and report planned work; write nothing. |
 | `--quiet` | off | Suppress progress reporting on stderr. |
 | `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
-| `--config <path>` | `./media-catalog.toml` if present | TOML configuration file. |
+| `--bind <addr>` | `127.0.0.1:8080` | Server listen address; overrides `bind` in TOML. |
+| `--max-streams <n>` | `8` | Server concurrent `/media/` streams; overrides `max_streams` in TOML. |
+| `--config <path>` | `./media-catalog.toml` if present | Shared TOML configuration file. |
 | `--events <path>` | none | Authored events content file; overrides `events_file` from TOML. |
 
 Example `media-catalog.toml`:
@@ -122,7 +127,13 @@ events_file = "./events.toml"
 media_url_prefix = "/media"
 thumb_url_prefix = "/thumbs"
 jobs = 4
+bind = "127.0.0.1:8080"
+max_streams = 8
 ```
+
+Both binaries accept every key in this schema. The generator ignores `bind` and
+`max_streams`; the server ignores `state_root`, `events_file`, URL prefixes,
+`jobs`, and generator-only flags. Keys outside the schema are rejected.
 
 URL prefixes are normalized to a leading slash and no trailing slash. Published
 data is written directly under the data root, and build state lives in the state
@@ -133,9 +144,10 @@ the current directory, like the storage roots. When neither `events_file` nor
 `--events` is set, the catalog has no events; a configured path must exist and
 be a file.
 
-The server accepts `--data-root`, `--media-root`, `--bind`, and
-`--max-streams`. The access token is read from `MEDIA_CATALOG_TOKEN`, never from
-the command line.
+The server resolves `--data-root`, `--media-root`, `--bind`, and `--max-streams`
+from the flag first, then the matching TOML key, then the built-in default where
+one exists. Storage roots have no default. The access token is read from
+`MEDIA_CATALOG_TOKEN`, never from the command line or the configuration file.
 
 ## Progress output
 
