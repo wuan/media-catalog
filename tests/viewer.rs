@@ -68,9 +68,9 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["fitTall"]["width"], 600.0);
     assert_eq!(result["fitTall"]["height"], 800.0);
     assert_eq!(result["fitMissing"], Value::Null);
-    assert_eq!(result["placeholderWide"]["width"], 1000.0);
-    assert_eq!(result["placeholderWide"]["height"], 1000.0);
-    assert_eq!(result["placeholderTall"]["width"], 800.0);
-    assert_eq!(result["placeholderTall"]["height"], 800.0);
+    assert_eq!(result["placeholderWide"]["width"], 750.0);
+    assert_eq!(result["placeholderWide"]["height"], 750.0);
+    assert_eq!(result["placeholderTall"]["width"], 600.0);
+    assert_eq!(result["placeholderTall"]["height"], 600.0);
     assert_eq!(result["placeholderMissing"], Value::Null);
 }

@@ -88,27 +88,23 @@ The viewer SHALL provide previous and next navigation through keyboard, on-scree
 
 ### Requirement: Present images with pan and zoom
 
-The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size it so the square 512x512 center-crop placeholder fills the longer edge of the original image's fitted box, making the placeholder occupy the same display area the original will cover along its longer dimension.
+The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents.
 
 #### Scenario: Original image
 - **WHEN** an image item opens
 - **THEN** the thumbnail is shown while the original loads and the original replaces it when available
 
-#### Scenario: Thumbnail fills the longer edge of the fitted box
+#### Scenario: Thumbnail matches the cropped region of the fitted box
 - **WHEN** an image item with known upright width and height opens and its thumbnail is shown while the original loads
-- **THEN** the thumbnail is scaled so its longer edge matches the longer edge of the original's fitted box in the stage, cover-filling that dimension so swapping in the original causes no layout shift along the longer axis
-
-#### Scenario: Thumbnail matches the original's display box
-- **WHEN** an image item with known upright width and height opens and its thumbnail is shown while the original loads
-- **THEN** the thumbnail occupies the same fitted size and position the original will occupy, cover-scaled from its center 512x512 crop, so swapping in the original causes no layout shift
+- **THEN** the thumbnail is shown as a square whose side equals the shorter edge of the original's fitted box, centered in the stage, so it lines up with the matching center region of the original when the original replaces it
 
 #### Scenario: Landscape original placeholder
 - **WHEN** a landscape image (width greater than height) opens with known dimensions and its thumbnail placeholder is shown
-- **THEN** the placeholder width equals the fitted box width (the longer edge) and its height is scaled proportionally from the square crop
+- **THEN** the placeholder width and height both equal the fitted box height (the shorter edge), leaving the left and right parts that only exist in the original empty
 
 #### Scenario: Portrait original placeholder
 - **WHEN** a portrait image (height greater than width) opens with known dimensions and its thumbnail placeholder is shown
-- **THEN** the placeholder height equals the fitted box height (the longer edge) and its width is scaled proportionally from the square crop
+- **THEN** the placeholder width and height both equal the fitted box width (the shorter edge), leaving the top and bottom parts that only exist in the original empty
 
 #### Scenario: Thumbnail without known dimensions
 - **WHEN** an image item without known width or height opens and its thumbnail is shown

@@ -69,7 +69,9 @@
     if (!box) {
       return null;
     }
-    var edge = Math.max(box.width, box.height);
+    // Thumbnails are square center crops of the original, so they cover
+    // exactly the original's shorter edge; size and center them on that.
+    var edge = Math.min(box.width, box.height);
     return { width: edge, height: edge };
   }
 
