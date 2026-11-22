@@ -45,6 +45,16 @@
       </ul>
     </nav>
     {% endif %}
+    {% if !other_items.is_empty() %}
+    <section class="event-section" id="other">
+      <h2>
+        Other
+        <span class="count">{{ other_items.len() }} items</span>
+      </h2>
+      {% let items = other_items %}
+      {% include "tiles.html" %}
+    </section>
+    {% endif %}
     {% for section in sections %}
     <section class="event-section" id="{{ section.slug }}">
       <h2>
@@ -59,16 +69,6 @@
       {% include "tiles.html" %}
     </section>
     {% endfor %}
-    {% if !other_items.is_empty() %}
-    <section class="event-section" id="other">
-      <h2>
-        Other
-        <span class="count">{{ other_items.len() }} items</span>
-      </h2>
-      {% let items = other_items %}
-      {% include "tiles.html" %}
-    </section>
-    {% endif %}
     {% endif %}
     {% endif %}
   </main>

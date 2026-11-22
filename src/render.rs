@@ -160,14 +160,19 @@ pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
             items: section.items.iter().map(tile_from_item).collect(),
         })
         .collect::<Vec<_>>();
-    let section_nav = sections
-        .iter()
-        .map(|section| SectionLink {
-            slug: section.slug.clone(),
-            title: section.title.clone(),
-            count: section.count,
-        })
-        .collect();
+    let mut section_nav: Vec<SectionLink> = Vec::new();
+    if !event.other_items.is_empty() {
+        section_nav.push(SectionLink {
+            slug: "other".into(),
+            title: "Other".into(),
+            count: event.other_items.len(),
+        });
+    }
+    section_nav.extend(sections.iter().map(|section| SectionLink {
+        slug: section.slug.clone(),
+        title: section.title.clone(),
+        count: section.count,
+    }));
     let html = EventTemplate {
         title: event.title.clone(),
         range: event_range(event),
@@ -719,7 +724,7 @@ mod tests {
         let other = html.find("id=\"other\"").unwrap();
         assert!(html.find("href=\"/media/2024/05/before.jpg\"").unwrap() > other);
         assert!(html.find("href=\"/media/2024/05/gap.jpg\"").unwrap() > other);
-        assert!(html.find("href=\"/media/2024/05/inside.jpg\"").unwrap() < other);
+        assert!(html.find("href=\"/media/2024/05/inside.jpg\"").unwrap() > other);
 
         let covered = event_catalog(
             vec![item("2024/05/inside.jpg", 2024, 5, "2024-05-10 10:00:00")],
@@ -763,7 +768,9 @@ mod tests {
         );
         let html = render_event(&catalog, "portugal").unwrap().unwrap();
         assert!(!html.contains("class=\"month-section\""));
-        assert!(!html.contains("class=\"section-nav\""));
+        assert!(html.contains("class=\"section-nav\""));
+        assert!(html.contains("href=\"#other\""));
+        assert!(!html.contains("href=\"#lisbon\""));
         assert!(html.contains("id=\"other\""));
         assert!(html.contains("href=\"/media/2024/05/gap.jpg\""));
     }

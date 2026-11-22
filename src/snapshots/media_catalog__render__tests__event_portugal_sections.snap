@@ -41,6 +41,7 @@ expression: html
     </nav>
     
     
+    
     <section class="event-section" id="lisbon">
       <h2>
         Lisbon
@@ -98,7 +99,6 @@ expression: html
   
 </div>
     </section>
-    
     
     
     

@@ -216,15 +216,15 @@ The service SHALL serve an event list at `/events/` and add an Events section ab
 
 ### Requirement: Render unsectioned items
 
-The service SHALL render items that fall outside every published section in an additional "Other" bucket after the authored sections, and SHALL omit that bucket when no such items exist.
+The service SHALL render items that fall outside every published section in an additional "Other" bucket before the authored sections, and SHALL omit that bucket when no such items exist. The Other bucket SHALL be the first group on a sectioned event page so the full page reads in chronological order.
 
 #### Scenario: Items between sections
 - **WHEN** published section ranges leave a gap containing items
-- **THEN** those items appear in the Other bucket
+- **THEN** those items appear in the Other bucket, which renders before all authored sections
 
 #### Scenario: Items before the first section
 - **WHEN** items occur before the first published section starts
-- **THEN** those items appear in the Other bucket
+- **THEN** those items appear in the Other bucket at the top of the event page
 
 #### Scenario: No unsectioned items
 - **WHEN** every item falls inside a published section
@@ -232,7 +232,7 @@ The service SHALL render items that fall outside every published section in an a
 
 ### Requirement: Render event pages
 
-The service SHALL render `/events/{slug}/` from the catalog snapshot as one page containing the event title, date range, description when present, item count, and the event's items grouped by authored sections when configured or by folder month otherwise. Sections SHALL appear in chronological order; months SHALL appear in reverse chronological order. The page SHALL include in-page navigation to its sections, reuse the existing lazy-loaded tile presentation, and remain usable without JavaScript.
+The service SHALL render `/events/{slug}/` from the catalog snapshot as one page containing the event title, date range, description when present, item count, and the event's items grouped by authored sections when configured or by folder month otherwise. On sectioned pages, the Other bucket SHALL appear first, followed by sections in chronological order; months SHALL appear in reverse chronological order on unsectioned pages. The page SHALL include in-page navigation to its groups, with the Other link first when present, reuse the existing lazy-loaded tile presentation, and remain usable without JavaScript.
 
 #### Scenario: Cross-month event page
 - **WHEN** an event contains items from May and June and has no sections
@@ -240,11 +240,11 @@ The service SHALL render `/events/{slug}/` from the catalog snapshot as one page
 
 #### Scenario: Sectioned event page
 - **WHEN** an event has authored sections
-- **THEN** the page shows the sections in chronological order instead of folder-month groups
+- **THEN** the page shows the Other bucket first (when non-empty), then the sections in chronological order instead of folder-month groups
 
 #### Scenario: Section navigation
 - **WHEN** a sectioned event page is rendered
-- **THEN** it includes in-page links to each non-empty section heading
+- **THEN** it includes in-page links to the Other bucket (when present, as the first link) and each non-empty section heading
 
 #### Scenario: Month heading link
 - **WHEN** an event page shows a month group
@@ -348,15 +348,11 @@ The run output of an events-only run SHALL identify the run as events-only, stat
 
 ### Requirement: Event page items are oldest first
 
-On event pages, items within each authored section, each folder-month group, and the
-"Other" bucket SHALL be ordered by capture timestamp ascending (oldest first), with
-the relative path as a stable tie-break. Month, year, and index pages SHALL keep the
-existing newest-first item order. The in-page viewer's previous/next navigation on an
-event page SHALL follow the document order of the rendered tiles.
+On event pages, items within the "Other" bucket, each authored section, and each folder-month group SHALL be ordered by capture timestamp ascending (oldest first), with the relative path as a stable tie-break. Because the Other bucket renders first and sections follow in chronological order, the full event page SHALL present all items in overall oldest-first order. Month, year, and index pages SHALL keep the existing newest-first item order. The in-page viewer's previous/next navigation on an event page SHALL follow the document order of the rendered tiles.
 
 #### Scenario: Sectioned event page
 - **WHEN** an event has authored sections and items fall within them
-- **THEN** each section renders its items oldest first
+- **THEN** the Other bucket (when present) renders first, followed by each section with its items oldest first
 
 #### Scenario: Unsectioned event page
 - **WHEN** an event has no sections and items are grouped by folder month
@@ -364,7 +360,7 @@ event page SHALL follow the document order of the rendered tiles.
 
 #### Scenario: Other bucket
 - **WHEN** an event page has an "Other" bucket with items outside every section
-- **THEN** the Other bucket renders its items oldest first
+- **THEN** the Other bucket renders first on the page and its items are oldest first
 
 #### Scenario: Viewer navigation on event page
 - **WHEN** a visitor opens the in-page viewer on an event page and uses next/previous
