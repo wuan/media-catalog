@@ -182,6 +182,18 @@ Catalog tiles SHALL remain regular links to original media so that albums remain
 - **WHEN** the viewer cannot initialize on a page
 - **THEN** tile links continue to open originals and no album interaction is broken
 
+### Requirement: Caption the open item
+
+The viewer SHALL show a single caption line for the open item containing the capture timestamp followed by the camera model when known, SHALL NOT show the filename in the caption, and SHALL use that caption line as the dialog's accessible name.
+
+#### Scenario: Caption content
+- **WHEN** an item opens in the viewer
+- **THEN** the caption shows the capture timestamp followed by the camera model when known, and does not show the filename
+
+#### Scenario: Caption without a model
+- **WHEN** an item without a known camera model opens in the viewer
+- **THEN** the caption shows only the capture timestamp
+
 ### Requirement: Keep the viewer accessible
 
 The viewer SHALL expose modal semantics, labelled controls, current-position information, and keyboard access for its primary actions.
