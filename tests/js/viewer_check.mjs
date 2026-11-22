@@ -62,7 +62,10 @@ const result = {
   tileHeight: tile.height,
   fitWide: api.fittedBox(4000, 3000, 1000, 800),
   fitTall: api.fittedBox(3000, 4000, 1000, 800),
-  fitMissing: api.fittedBox(0, 0, 1000, 800)
+  fitMissing: api.fittedBox(0, 0, 1000, 800),
+  placeholderWide: api.placeholderBox(4000, 3000, 1000, 800),
+  placeholderTall: api.placeholderBox(3000, 4000, 1000, 800),
+  placeholderMissing: api.placeholderBox(0, 0, 1000, 800)
 };
 
 console.log(JSON.stringify(result));

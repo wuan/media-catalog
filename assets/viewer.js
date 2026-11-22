@@ -64,6 +64,15 @@
     return { width: width * fit, height: height * fit };
   }
 
+  function placeholderBox(width, height, stageWidth, stageHeight) {
+    var box = fittedBox(width, height, stageWidth, stageHeight);
+    if (!box) {
+      return null;
+    }
+    var edge = Math.max(box.width, box.height);
+    return { width: edge, height: edge };
+  }
+
   function clampPan(x, y, scale, baseWidth, baseHeight, stageWidth, stageHeight) {
     var maxX = Math.max(0, ((baseWidth || 0) * scale - stageWidth) / 2);
     var maxY = Math.max(0, ((baseHeight || 0) * scale - stageHeight) / 2);
@@ -451,7 +460,7 @@
 
     if (item.thumbUrl && item.width && item.height) {
       image.classList.add("is-placeholder");
-      var box = fittedBox(item.width, item.height, state.stageWidth, state.stageHeight);
+      var box = placeholderBox(item.width, item.height, state.stageWidth, state.stageHeight);
       if (box) {
         image.style.width = box.width + "px";
         image.style.height = box.height + "px";
@@ -1000,7 +1009,8 @@
     swipeThreshold: swipeThreshold,
     isSwipe: isSwipe,
     tileFromElement: tileFromElement,
-    fittedBox: fittedBox
+    fittedBox: fittedBox,
+    placeholderBox: placeholderBox
   };
 
   if (typeof document !== "undefined" && typeof window !== "undefined") {
