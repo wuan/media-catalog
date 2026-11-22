@@ -70,6 +70,44 @@ fn help_starts_and_documents_flags() {
         !stdout.contains("--catalog-root"),
         "help still documents --catalog-root: {stdout}"
     );
+    assert!(
+        stdout.contains("authored events content file"),
+        "help does not describe --events: {stdout}"
+    );
+    assert!(
+        !stdout.contains("./events.toml"),
+        "help still documents the implicit events default: {stdout}"
+    );
+}
+
+#[test]
+fn missing_events_flag_path_is_rejected_before_building() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+
+    let output = Command::new(binary())
+        .args([
+            "--media-root",
+            fixture.media.to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
+            "--events",
+            fixture.root().join("missing.toml").to_str().unwrap(),
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("events file not found"),
+        "stderr was: {stderr}"
+    );
+    assert!(!fixture.data.exists());
+    assert!(!fixture.state_db().exists());
 }
 
 #[test]

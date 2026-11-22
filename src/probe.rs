@@ -397,11 +397,12 @@ fn parse_tiff(data: &[u8]) -> Option<ExifMetadata> {
     Some(metadata)
 }
 
+/// Offsets of the IFD0 tags read for catalog metadata: orientation, model,
+/// ExifIFD pointer, and DateTime.
+type Ifd0Entries = (Option<usize>, Option<usize>, Option<usize>, Option<usize>);
+
 /// Returns (orientation entry offset, model entry offset, ExifIFD pointer entry offset, DateTime entry offset).
-fn find_ifd0_entries(
-    reader: &TiffReader<'_>,
-    offset: usize,
-) -> Option<(Option<usize>, Option<usize>, Option<usize>, Option<usize>)> {
+fn find_ifd0_entries(reader: &TiffReader<'_>, offset: usize) -> Option<Ifd0Entries> {
     let count = reader.u16(offset)? as usize;
     let entries_start = offset + 2;
     let mut orientation = None;

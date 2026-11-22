@@ -543,6 +543,49 @@ end = "2024-05-01 09:00"
 }
 
 #[test]
+fn events_load_through_media_catalog_toml() {
+    use clap::Parser;
+    use media_catalog::config::{Cli, Config};
+
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif("2024/05/a.jpg", Some(1), Some("2024:05:30 10:00:00"), false);
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "may-trip"
+title = "May trip"
+start = "2024-05-28 09:00"
+end = "2024-06-05 18:30"
+"#,
+    )
+    .unwrap();
+    let config_path = fixture.root().join("media-catalog.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "media_root = \"{}\"\ndata_root = \"{}\"\nstate_root = \"{}\"\nevents_file = \"{}\"\njobs = 2\nquiet = true\n",
+            fixture.media.display(),
+            fixture.data.display(),
+            fixture.state.display(),
+            events_path.display()
+        ),
+    )
+    .unwrap();
+
+    let cli = Cli::parse_from(["media-catalog", "--config", config_path.to_str().unwrap()]);
+    let config = Config::load(cli).unwrap();
+    assert_eq!(config.events_file.as_deref(), Some(events_path.as_path()));
+
+    let outcome = run_with_config(config).unwrap();
+    assert_eq!(outcome.summary.event_counts.len(), 1);
+    assert_eq!(outcome.summary.event_counts[0].slug, "may-trip");
+    assert_eq!(outcome.summary.event_counts[0].count, 1);
+    assert!(fixture.read_json("catalog/index.json").contains("may-trip"));
+}
+
+#[test]
 fn catalogs_without_events_omit_event_fields_and_load_as_empty() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/a.jpg", 20, 20, 1);

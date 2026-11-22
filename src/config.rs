@@ -61,7 +61,8 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// Optional events content file. Defaults to ./events.toml when present.
+    /// Optional authored events content file. Overrides `events_file` from the
+    /// configuration file.
     #[arg(long, value_name = "PATH")]
     pub events: Option<PathBuf>,
 }
@@ -81,6 +82,7 @@ pub struct FileConfig {
     pub dry_run: Option<bool>,
     pub quiet: Option<bool>,
     pub allow_mount_drop: Option<bool>,
+    pub events_file: Option<PathBuf>,
 }
 
 /// Fully resolved and validated configuration.
@@ -178,7 +180,8 @@ impl Config {
         let quiet = cli.quiet || file.quiet.unwrap_or(false);
         let allow_mount_drop = cli.allow_mount_drop || file.allow_mount_drop.unwrap_or(false);
 
-        let events_file = resolve_events_path(cli.events.as_deref(), &cwd)?;
+        let events_file =
+            resolve_events_path(cli.events.as_deref().or(file.events_file.as_deref()), &cwd)?;
 
         let config = Self {
             media_root,
@@ -285,25 +288,20 @@ fn state_db_for(state_root: &Path) -> PathBuf {
     state_root.join("state.sqlite")
 }
 
-/// Resolve the events content file: explicit paths must exist; the default
-/// `./events.toml` is loaded only when present.
-fn resolve_events_path(explicit: Option<&Path>, cwd: &Path) -> Result<Option<PathBuf>> {
-    match explicit {
-        Some(path) => {
-            let path = absolutize(cwd, path);
-            if !path.exists() {
-                bail!("events file not found: {}", path.display());
-            }
-            if !path.is_file() {
-                bail!("events path is not a file: {}", path.display());
-            }
-            Ok(Some(path))
-        }
-        None => {
-            let candidate = absolutize(cwd, Path::new("events.toml"));
-            Ok(candidate.is_file().then_some(candidate))
-        }
+/// Resolve the events content file. When no path is configured the catalog has
+/// no events; a configured path must exist and be a file.
+fn resolve_events_path(configured: Option<&Path>, cwd: &Path) -> Result<Option<PathBuf>> {
+    let Some(path) = configured else {
+        return Ok(None);
+    };
+    let path = absolutize(cwd, path);
+    if !path.exists() {
+        bail!("events file not found: {}", path.display());
     }
+    if !path.is_file() {
+        bail!("events path is not a file: {}", path.display());
+    }
+    Ok(Some(path))
 }
 
 fn absolutize(cwd: &Path, path: &Path) -> PathBuf {
@@ -640,18 +638,127 @@ mod tests {
     }
 
     #[test]
-    fn events_file_defaults_to_events_toml_when_present() {
+    fn events_cli_flag_overrides_toml_value() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("events.toml");
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let toml_events = temp.path().join("toml-events.toml");
+        let cli_events = temp.path().join("cli-events.toml");
+        std::fs::write(&toml_events, "").unwrap();
+        std::fs::write(&cli_events, "").unwrap();
+
+        let file = FileConfig {
+            events_file: Some(toml_events),
+            ..FileConfig::default()
+        };
+        let config = Config::resolve(
+            Cli {
+                events: Some(cli_events.clone()),
+                ..cli_with_roots(
+                    media.to_str().unwrap(),
+                    temp.path().join("data").to_str().unwrap(),
+                    temp.path().join("state").to_str().unwrap(),
+                )
+            },
+            file,
+            2,
+        )
+        .unwrap();
+        assert_eq!(config.events_file.as_deref(), Some(cli_events.as_path()));
+    }
+
+    #[test]
+    fn events_file_from_toml_is_used() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let events = temp.path().join("events.toml");
+        std::fs::write(&events, "").unwrap();
+
+        let path = temp.path().join("media-catalog.toml");
+        std::fs::write(
+            &path,
+            format!(
+                "media_root = \"{}\"\ndata_root = \"{}\"\nstate_root = \"{}\"\nevents_file = \"{}\"\n",
+                media.display(),
+                temp.path().join("data").display(),
+                temp.path().join("state").display(),
+                events.display()
+            ),
+        )
+        .unwrap();
+        let file = load_file_config(Some(&path)).unwrap();
+        let config = Config::resolve(Cli::parse_from(["media-catalog"]), file, 2).unwrap();
+        assert_eq!(config.events_file.as_deref(), Some(events.as_path()));
+    }
+
+    #[test]
+    fn neither_events_source_yields_no_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            FileConfig::default(),
+            2,
+        )
+        .unwrap();
+        assert!(config.events_file.is_none());
+    }
+
+    #[test]
+    fn absent_events_path_yields_no_events() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_events_path(None, temp.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn missing_configured_events_file_is_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            events_file: Some(temp.path().join("events.toml")),
+            ..FileConfig::default()
+        };
+        let error = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            file,
+            2,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("events file not found"), "{message}");
+    }
+
+    #[test]
+    fn relative_configured_events_path_is_resolved_against_cwd() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let path = nested.join("events.toml");
         std::fs::write(&path, "").unwrap();
-        let resolved = resolve_events_path(None, temp.path()).unwrap();
+        let resolved =
+            resolve_events_path(Some(Path::new("nested/events.toml")), temp.path()).unwrap();
         assert_eq!(resolved.as_deref(), Some(path.as_path()));
     }
 
     #[test]
-    fn absent_default_events_file_is_optional() {
+    fn directory_events_path_is_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        assert_eq!(resolve_events_path(None, temp.path()).unwrap(), None);
+        let directory = temp.path().join("events");
+        std::fs::create_dir_all(&directory).unwrap();
+        let error = resolve_events_path(Some(&directory), temp.path()).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("events path is not a file"), "{message}");
     }
 
     #[test]

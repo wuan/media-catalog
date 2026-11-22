@@ -110,7 +110,7 @@ reads `./media-catalog.toml` when that file exists.
 | `--quiet` | off | Suppress progress reporting on stderr. |
 | `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
 | `--config <path>` | `./media-catalog.toml` if present | TOML configuration file. |
-| `--events <path>` | `./events.toml` if present | Authored events content file. |
+| `--events <path>` | none | Authored events content file; overrides `events_file` from TOML. |
 
 Example `media-catalog.toml`:
 
@@ -118,6 +118,7 @@ Example `media-catalog.toml`:
 media_root = "/mnt/nas/media"
 data_root = "./data"
 state_root = "./state"
+events_file = "./events.toml"
 media_url_prefix = "/media"
 thumb_url_prefix = "/thumbs"
 jobs = 4
@@ -126,6 +127,11 @@ jobs = 4
 URL prefixes are normalized to a leading slash and no trailing slash. Published
 data is written directly under the data root, and build state lives in the state
 root outside the published tree.
+
+`events_file` is optional. Paths in the configuration file are resolved against
+the current directory, like the storage roots. When neither `events_file` nor
+`--events` is set, the catalog has no events; a configured path must exist and
+be a file.
 
 The server accepts `--data-root`, `--media-root`, `--bind`, and
 `--max-streams`. The access token is read from `MEDIA_CATALOG_TOKEN`, never from
@@ -186,9 +192,15 @@ pixels and therefore carry no source metadata.
 
 ## Events
 
-Events are authored content, kept separate from deployment configuration in
-`events.toml`. The generator loads `./events.toml` when it exists; use
-`--events <path>` to load another file. The server never reads it.
+Events are authored content, kept in their own file and pointed to by
+deployment configuration. Set `events_file` in `media-catalog.toml`, or pass
+`--events <path>` to override it for a single run. The server never reads the
+events file.
+
+Migration note: earlier versions loaded `./events.toml` implicitly when it
+existed. That probe is gone. Place `events_file = "./events.toml"` in
+`media-catalog.toml` (or pass `--events`) to keep loading it; without a
+configured path, builds publish a catalog with no events.
 
 ```toml
 [[events]]
@@ -237,11 +249,12 @@ bookmark belongs to the later section. Sections are published in chronological
 order.
 
 The generator validates slugs, titles, timestamps, and ranges before scanning. A
-missing explicit `--events` path, duplicate event or section slug, duplicate
-section timestamp, malformed timestamp, section outside its event, or reversed
-range fails the run before any work starts. A catalog without an events file
-publishes no event fields and remains byte-identical to a catalog built before
-event support. Events without sections also remain byte-identical.
+missing configured events path (from `events_file` or `--events`), duplicate
+event or section slug, duplicate section timestamp, malformed timestamp, section
+outside its event, or reversed range fails the run before any work starts. A
+catalog without an events file publishes no event fields and remains
+byte-identical to a catalog built before event support. Events without sections
+also remain byte-identical.
 
 Event pages group items by authored section in chronological order when sections
 are configured; otherwise they group items by folder month, newest month and
@@ -421,7 +434,7 @@ Event fields are additive: `events` is omitted from the index and from every ite
 when no events are configured, and an event's `sections` array is omitted when it
 has no sections. Older catalogs without the fields load as having no events or
 sections. Item event slugs are sorted independently of the order events appear
-in `events.toml`. The camera model is also optional per item and omitted when
+in the events file. The camera model is also optional per item and omitted when
 unknown. Sections publish
 resolved `start`/`end` ranges rather than bookmark timestamps, so the server does
 not depend on the generator's bookmark derivation rule.
