@@ -365,6 +365,7 @@ mod tests {
             month,
             kind: MediaKind::Image,
             captured_at: Some("2024-05-01 10:00:00".to_string()),
+            model: None,
             mtime_ns: 0,
             width: Some(10),
             height: Some(10),

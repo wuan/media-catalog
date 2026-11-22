@@ -73,6 +73,21 @@
     return minutes + ":" + String(seconds).padStart(2, "0");
   }
 
+  function formatCaptured(value) {
+    var text = String(value == null ? "" : value);
+    var match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(text);
+    if (!match) {
+      return text;
+    }
+    return match[1].slice(2) + "-" + match[2] + "-" + match[3] + " " + match[4] + ":" + match[5];
+  }
+
+  function captionText(item) {
+    var short = formatCaptured(item.captured_at || "");
+    var model = item.model ? String(item.model) : "";
+    return model ? short + " " + model : short;
+  }
+
   function buildTile(item) {
     var figure = document.createElement("figure");
     figure.className = "tile";
@@ -121,13 +136,15 @@
     }
 
     var caption = document.createElement("figcaption");
-    var nameSpan = document.createElement("span");
-    nameSpan.className = "name";
-    nameSpan.textContent = name;
     var time = document.createElement("time");
-    time.textContent = item.captured_at || "";
-    caption.appendChild(nameSpan);
+    time.textContent = formatCaptured(item.captured_at || "");
     caption.appendChild(time);
+    if (item.model) {
+      var modelSpan = document.createElement("span");
+      modelSpan.className = "model";
+      modelSpan.textContent = item.model;
+      caption.appendChild(modelSpan);
+    }
     link.appendChild(caption);
     figure.appendChild(link);
     return figure;
@@ -256,6 +273,8 @@
   globalThis.__mediaCatalogSearch = {
     filterItems: filterItems,
     formatDuration: formatDuration,
+    formatCaptured: formatCaptured,
+    captionText: captionText,
     filtersFromParams: filtersFromParams,
     filtersToQuery: filtersToQuery
   };

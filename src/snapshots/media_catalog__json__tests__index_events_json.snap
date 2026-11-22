@@ -3,7 +3,7 @@ source: src/json.rs
 expression: output.index
 ---
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "total_items": 3,
   "years": [
     {

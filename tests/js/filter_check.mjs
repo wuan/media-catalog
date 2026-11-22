@@ -45,6 +45,15 @@ const result = {
   restoredKind: restored.kind,
   restoredYear: restored.year,
   restoredMonth: restored.month,
+  captionWithModel: api.captionText({
+    captured_at: "2024-05-01 10:00:00",
+    model: "iPhone 15 Pro"
+  }),
+  captionWithoutModel: api.captionText({ captured_at: "2024-05-01 10:00:00" }),
+  captionEmptyModel: api.captionText({
+    captured_at: "2024-05-01 10:00:00",
+    model: ""
+  }),
   query: query
 };
 

@@ -201,7 +201,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
             file.mtime_ns,
         );
         database.set_thumb(&file.rel_path, None, None, ThumbStatus::Unsupported, None)?;
-        database.set_probe(&file.rel_path, None, None, None, Some(&fallback))?;
+        database.set_probe(&file.rel_path, None, None, None, Some(&fallback), None)?;
         summary.thumbnails_unsupported += 1;
         summary.unsupported.push(file.rel_path.clone());
     }
@@ -268,6 +268,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
                     result.height,
                     result.duration_ms,
                     result.captured_at.as_deref(),
+                    result.model.as_deref(),
                 )?;
                 summary.probed += 1;
             }
@@ -278,6 +279,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
                     None,
                     None,
                     Some(&outcome.fallback_captured_at),
+                    None,
                 )?;
                 push_error(&mut summary, &outcome.rel_path, &format!("{error:#}"));
             }
@@ -430,6 +432,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
             month: file.month,
             kind: file.kind,
             captured_at: record.and_then(|record| record.captured_at.clone()),
+            model: record.and_then(|record| record.model.clone()),
             mtime_ns: file.mtime_ns,
             width: record.and_then(|record| record.width),
             height: record.and_then(|record| record.height),

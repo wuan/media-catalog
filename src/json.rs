@@ -13,7 +13,7 @@ use crate::model::{
 use crate::paths::item_name;
 use crate::scan::MediaKind;
 
-pub const JSON_SCHEMA_VERSION: u32 = 1;
+pub const JSON_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexFile {
@@ -138,6 +138,8 @@ pub struct ShardItem {
     pub month: u32,
     pub kind: MediaKind,
     pub captured_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
@@ -156,6 +158,7 @@ impl From<&ItemView> for ShardItem {
             month: item.month,
             kind: item.kind,
             captured_at: item.captured_at.clone(),
+            model: item.model.clone(),
             width: item.width,
             height: item.height,
             duration_ms: item.duration_ms,
@@ -176,6 +179,7 @@ impl ShardItem {
             month: self.month,
             kind: self.kind,
             captured_at: self.captured_at.clone(),
+            model: self.model.clone(),
             width: self.width,
             height: self.height,
             duration_ms: self.duration_ms,
@@ -490,6 +494,7 @@ mod tests {
                     month: 12,
                     kind: MediaKind::Image,
                     captured_at: Some("2023-12-01 10:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),
@@ -503,6 +508,7 @@ mod tests {
                     month: 5,
                     kind: MediaKind::Video,
                     captured_at: Some("2024-05-02 11:00:00".into()),
+                    model: Some("iPhone 15 Pro".into()),
                     mtime_ns: 0,
                     width: Some(1920),
                     height: Some(1080),
@@ -516,6 +522,7 @@ mod tests {
                     month: 5,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-05-03 12:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: None,
                     height: None,
@@ -538,6 +545,7 @@ mod tests {
         assert_eq!(output.shards.len(), 2);
         assert!(output.shards[&2024].contains("\"kind\": \"video\""));
         assert!(output.shards[&2024].contains("\"duration_ms\": 12500"));
+        assert!(output.shards[&2024].contains("\"model\": \"iPhone 15 Pro\""));
         assert!(output.shards[&2024].contains("\"thumb_available\": false"));
     }
 
@@ -557,7 +565,7 @@ mod tests {
             output.index,
             output.shards.values().cloned().collect::<String>()
         );
-        for forbidden in ["gps", "camera", "make", "model", "latitude", "longitude"] {
+        for forbidden in ["gps", "location", "latitude", "longitude", "serial"] {
             assert!(!all.to_ascii_lowercase().contains(forbidden));
         }
     }
@@ -578,6 +586,7 @@ mod tests {
                     month: 5,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-05-30 10:11:12".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),
@@ -591,6 +600,7 @@ mod tests {
                     month: 6,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-06-02 09:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),
@@ -604,6 +614,7 @@ mod tests {
                     month: 6,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-06-20 09:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),
@@ -675,6 +686,7 @@ mod tests {
                     month: 5,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-05-02 10:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),
@@ -688,6 +700,7 @@ mod tests {
                     month: 5,
                     kind: MediaKind::Image,
                     captured_at: Some("2024-05-10 10:00:00".into()),
+                    model: None,
                     mtime_ns: 0,
                     width: Some(4000),
                     height: Some(3000),

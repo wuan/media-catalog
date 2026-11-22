@@ -4,9 +4,11 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use common::{set_readable, Fixture};
+use media_catalog::fingerprint;
 use media_catalog::lock::BuildLock;
 use media_catalog::state::StateDb;
 use media_catalog::{json, render, run_with_config};
+use rusqlite::params;
 use serde_json::Value;
 
 fn rendered_month(fixture: &Fixture, year: i32, month: u32) -> String {
@@ -91,6 +93,83 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
 
     let state = StateDb::open(&fixture.state_db()).unwrap();
     assert_eq!(state.item_count().unwrap(), 3);
+}
+
+#[test]
+fn v1_state_migrates_and_reprobes_unchanged_items_once() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+
+    let source = fixture.media_path("2024/05/a.jpg");
+    let metadata = std::fs::metadata(&source).unwrap();
+    let size = metadata.len();
+    let mtime_ns = fingerprint::mtime_nanos(&metadata);
+    let file_fingerprint = fingerprint::fingerprint(size, mtime_ns);
+
+    std::fs::create_dir_all(&fixture.state).unwrap();
+    let conn = rusqlite::Connection::open(fixture.state_db()).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE items (
+            path          TEXT PRIMARY KEY,
+            year          INTEGER NOT NULL,
+            month         INTEGER NOT NULL,
+            kind          TEXT NOT NULL,
+            size          INTEGER NOT NULL,
+            mtime         INTEGER NOT NULL,
+            fingerprint   TEXT NOT NULL,
+            width         INTEGER,
+            height        INTEGER,
+            duration_ms   INTEGER,
+            captured_at   TEXT,
+            thumb_path    TEXT,
+            thumb_version TEXT,
+            thumb_status  TEXT NOT NULL,
+            error         TEXT,
+            last_seen_run INTEGER NOT NULL
+        );
+        CREATE INDEX items_month ON items(year, month);
+        CREATE TABLE runs (
+            id          INTEGER PRIMARY KEY,
+            started_at  TEXT,
+            finished_at TEXT,
+            status      TEXT,
+            item_count  INTEGER,
+            error_count INTEGER
+        );
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta (key, value) VALUES ('schema_version', '1');",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO items
+            (path, year, month, kind, size, mtime, fingerprint, width, height,
+             duration_ms, captured_at, thumb_path, thumb_version, thumb_status,
+             error, last_seen_run)
+         VALUES (?1, 2024, 5, 'image', ?2, ?3, ?4, 10, 10, NULL,
+                 '2000-01-01 00:00:00', NULL, NULL, 'pending', NULL, 0)",
+        params!["2024/05/a.jpg", size as i64, mtime_ns, file_fingerprint,],
+    )
+    .unwrap();
+    drop(conn);
+
+    let first = run_with_config(fixture.config()).unwrap();
+    assert_eq!(first.summary.new, 0);
+    assert_eq!(first.summary.changed, 0);
+    assert_eq!(first.summary.unchanged, 1);
+    assert_eq!(first.summary.probed, 1);
+    assert_eq!(first.summary.thumbnails_generated, 1);
+
+    let state = StateDb::open(&fixture.state_db()).unwrap();
+    let item = state.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+    assert_eq!(item.width, Some(20));
+    assert_eq!(item.height, Some(20));
+    assert!(item.captured_at.is_some());
+    assert_eq!(item.thumb_status, media_catalog::state::ThumbStatus::Ok);
+
+    let second = run_with_config(fixture.config()).unwrap();
+    assert_eq!(second.summary.probed, 0);
+    assert_eq!(second.summary.thumbnails_generated, 0);
+    assert_eq!(second.summary.thumbnails_skipped, 1);
 }
 
 #[test]
@@ -319,14 +398,7 @@ fn heic_is_unavailable_and_metadata_is_private() {
 
     let shard = fixture.read_json("catalog/2024.json");
     let lower = shard.to_ascii_lowercase();
-    for forbidden in [
-        "gps",
-        "latitude",
-        "longitude",
-        "camera",
-        "\"make\"",
-        "\"model\"",
-    ] {
+    for forbidden in ["gps", "latitude", "longitude", "serial"] {
         assert!(
             !lower.contains(forbidden),
             "JSON contained {forbidden}: {shard}"

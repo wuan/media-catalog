@@ -973,7 +973,8 @@
     albumIndexOf: albumIndexOf,
     nextIndex: nextIndex,
     swipeThreshold: swipeThreshold,
-    isSwipe: isSwipe
+    isSwipe: isSwipe,
+    tileFromElement: tileFromElement
   };
 
   if (typeof document !== "undefined" && typeof window !== "undefined") {

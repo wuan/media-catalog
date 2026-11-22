@@ -61,6 +61,9 @@ fn search_filters_narrow_the_loaded_shards() {
     assert_eq!(result["restoredKind"], "video");
     assert_eq!(result["restoredYear"], "2024");
     assert_eq!(result["restoredMonth"], "05");
+    assert_eq!(result["captionWithModel"], "24-05-01 10:00 iPhone 15 Pro");
+    assert_eq!(result["captionWithoutModel"], "24-05-01 10:00");
+    assert_eq!(result["captionEmptyModel"], "24-05-01 10:00");
     assert_eq!(result["query"], "q=gamma&kind=video&year=2023&month=12");
 }
 

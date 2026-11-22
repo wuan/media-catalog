@@ -58,4 +58,7 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["swipeYes"], true);
     assert_eq!(result["swipeNo"], false);
     assert_eq!(result["swipeSmall"], false);
+    assert_eq!(result["tileName"], "a.jpg");
+    assert_eq!(result["tileCaptured"], "2024-05-01 10:00:00");
+    assert_eq!(result["tileAlt"], "a.jpg");
 }

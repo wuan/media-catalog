@@ -63,10 +63,7 @@ expression: html
       <img src="/thumbs/2024/05/lisbon.jpg.webp?v=10-20" alt="lisbon.jpg" loading="lazy" decoding="async">
       
       
-      <figcaption>
-        <span class="name">lisbon.jpg</span>
-        <time>2024-05-02 10:00:00</time>
-      </figcaption>
+      <figcaption><time>24-05-02 10:00</time></figcaption>
     </a>
   </figure>
   
@@ -95,10 +92,7 @@ expression: html
       <img src="/thumbs/2024/05/algarve.jpg.webp?v=10-20" alt="algarve.jpg" loading="lazy" decoding="async">
       
       
-      <figcaption>
-        <span class="name">algarve.jpg</span>
-        <time>2024-05-10 10:00:00</time>
-      </figcaption>
+      <figcaption><time>24-05-10 10:00</time></figcaption>
     </a>
   </figure>
   

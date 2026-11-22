@@ -15,6 +15,7 @@ pub struct CatalogItemInput {
     pub month: u32,
     pub kind: MediaKind,
     pub captured_at: Option<String>,
+    pub model: Option<String>,
     pub mtime_ns: i64,
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -35,6 +36,7 @@ pub struct ItemView {
     pub month: u32,
     pub kind: MediaKind,
     pub captured_at: String,
+    pub model: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
@@ -187,6 +189,7 @@ pub fn build_catalog(
             captured_at: capture_timestamp(item.captured_at, item.mtime_ns)
                 .trim()
                 .to_string(),
+            model: item.model,
             path: item.rel_path,
             year: item.year,
             month: item.month,
@@ -251,6 +254,7 @@ mod tests {
             month,
             kind: MediaKind::Image,
             captured_at: Some(captured_at.to_string()),
+            model: None,
             mtime_ns: 0,
             width: Some(10),
             height: Some(10),

@@ -107,6 +107,7 @@ fn item(path: &str, kind: MediaKind) -> CatalogItemInput {
         month: 5,
         kind,
         captured_at: Some("2024-05-01 10:00:00".to_string()),
+        model: None,
         mtime_ns: 0,
         width: Some(4000),
         height: Some(3000),
@@ -327,7 +328,7 @@ async fn renders_catalog_pages_and_hides_state() {
     );
     assert_eq!(header_value(&headers, header::CACHE_CONTROL), "no-cache");
     let index: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(index["schema_version"], 1);
+    assert_eq!(index["schema_version"], 2);
     assert_eq!(index["years"][0]["year"], 2024);
 
     let (status, headers, body) =

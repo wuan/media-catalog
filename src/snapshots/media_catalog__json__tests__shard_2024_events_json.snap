@@ -3,7 +3,7 @@ source: src/json.rs
 expression: "output.shards[&2024]"
 ---
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "year": 2024,
   "items": [
     {

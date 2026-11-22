@@ -37,10 +37,7 @@ expression: "render_month(&catalog, 2024, 5).unwrap().unwrap()"
       <img src="/thumbs/2024/05/a.jpg.webp?v=10-20" alt="a.jpg" loading="lazy" decoding="async">
       
       
-      <figcaption>
-        <span class="name">a.jpg</span>
-        <time>2024-05-01 10:00:00</time>
-      </figcaption>
+      <figcaption><time>24-05-01 10:00</time></figcaption>
     </a>
   </figure>
   

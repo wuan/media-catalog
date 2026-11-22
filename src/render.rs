@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use askama::Template;
+use chrono::NaiveDateTime;
 
 use crate::model::{Catalog, EventView, ItemView};
 use crate::paths::{event_page_url, month_page_url, year_page_url};
@@ -99,11 +100,12 @@ struct TileView {
     thumb_url: String,
     thumb_available: bool,
     alt: String,
-    name: String,
     kind: &'static str,
     is_video: bool,
     duration_label: String,
     captured_label: String,
+    caption_time: String,
+    model: String,
     width: Option<u32>,
     height: Option<u32>,
 }
@@ -262,14 +264,23 @@ fn tile_from_item(item: &ItemView) -> TileView {
         thumb_url: item.thumb_url.clone().unwrap_or_default(),
         thumb_available: item.thumb_available && item.thumb_url.is_some(),
         alt,
-        name: item.name.clone(),
         kind: item.kind.as_str(),
         is_video: item.kind == MediaKind::Video,
         duration_label: item.duration_ms.map(format_duration).unwrap_or_default(),
         captured_label: item.captured_at.clone(),
+        caption_time: short_capture_label(&item.captured_at),
+        model: item.model.clone().unwrap_or_default(),
         width: item.width,
         height: item.height,
     }
+}
+
+/// Format the canonical capture timestamp for a tile caption without changing
+/// the stored value used for ordering, event matching, or viewer metadata.
+fn short_capture_label(raw: &str) -> String {
+    NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M:%S")
+        .map(|timestamp| timestamp.format("%y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|_| raw.to_string())
 }
 
 pub fn format_duration(duration_ms: u64) -> String {
@@ -296,6 +307,7 @@ mod tests {
             month,
             kind: MediaKind::Image,
             captured_at: Some(captured_at.to_string()),
+            model: None,
             mtime_ns: 0,
             width: Some(4000),
             height: Some(3000),
@@ -374,19 +386,46 @@ mod tests {
     }
 
     #[test]
+    fn tile_caption_shows_short_time_and_model() {
+        let catalog = build_catalog(
+            vec![
+                CatalogItemInput {
+                    model: Some("iPhone 15 Pro".into()),
+                    ..item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")
+                },
+                item("2024/05/b.jpg", 2024, 5, "2024-05-02 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert!(html.contains("<time>24-05-01 10:00</time>"));
+        assert!(html.contains("<span class=\"model\">iPhone 15 Pro</span>"));
+        assert!(html.contains("<time>24-05-02 10:00</time>"));
+        assert_eq!(html.matches("class=\"model\"").count(), 1);
+        assert!(html.contains("data-captured=\"2024-05-01 10:00:00\""));
+        assert!(html.contains("alt=\"a.jpg\""));
+        assert!(!html.contains("<span class=\"name\">"));
+    }
+
+    #[test]
     fn escapes_markup_and_alt_text_is_non_empty() {
         let catalog = build_catalog(
-            vec![item(
-                "2024/05/<script>alert(1).jpg",
-                2024,
-                5,
-                "2024-05-01 10:00:00",
-            )],
+            vec![CatalogItemInput {
+                model: Some("<script>alert(2)</script>".into()),
+                ..item(
+                    "2024/05/<script>alert(1).jpg",
+                    2024,
+                    5,
+                    "2024-05-01 10:00:00",
+                )
+            }],
             "/media",
             "/thumbs",
         );
         let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
         assert!(!html.contains("<script>alert(1)"));
+        assert!(!html.contains("<script>alert(2)"));
         assert!(
             html.contains("&#60;script&#62;alert(1).jpg")
                 || html.contains("&lt;script&gt;alert(1).jpg")
@@ -394,6 +433,10 @@ mod tests {
         assert!(
             html.contains("alt=\"&#60;script&#62;alert(1).jpg\"")
                 || html.contains("alt=\"&lt;script&gt;alert(1).jpg\"")
+        );
+        assert!(
+            html.contains("&#60;script&#62;alert(2)&#60;/script&#62;")
+                || html.contains("&lt;script&gt;alert(2)&lt;/script&gt;")
         );
     }
 

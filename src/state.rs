@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use crate::scan::{MediaKind, ScannedFile};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Thumbnail lifecycle state stored per item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +53,7 @@ pub struct ItemRecord {
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
     pub captured_at: Option<String>,
+    pub model: Option<String>,
     pub thumb_path: Option<String>,
     pub thumb_version: Option<String>,
     pub thumb_status: ThumbStatus,
@@ -109,13 +110,13 @@ impl StateDb {
     pub fn load_items(&self) -> Result<HashMap<String, ItemRecord>> {
         let mut statement = self.conn.prepare(
             "SELECT path, year, month, kind, size, mtime, fingerprint, width, height,
-                    duration_ms, captured_at, thumb_path, thumb_version, thumb_status,
+                    duration_ms, captured_at, model, thumb_path, thumb_version, thumb_status,
                     error, last_seen_run
              FROM items",
         )?;
         let rows = statement.query_map([], |row| {
             let kind_text: String = row.get(3)?;
-            let thumb_status_text: String = row.get(13)?;
+            let thumb_status_text: String = row.get(14)?;
             Ok(ItemRecord {
                 path: row.get(0)?,
                 year: row.get(1)?,
@@ -128,12 +129,13 @@ impl StateDb {
                 height: row.get(8)?,
                 duration_ms: row.get::<_, Option<i64>>(9)?.map(|value| value as u64),
                 captured_at: row.get(10)?,
-                thumb_path: row.get(11)?,
-                thumb_version: row.get(12)?,
+                model: row.get(11)?,
+                thumb_path: row.get(12)?,
+                thumb_version: row.get(13)?,
                 thumb_status: ThumbStatus::parse(&thumb_status_text)
                     .unwrap_or(ThumbStatus::Pending),
-                error: row.get(14)?,
-                last_seen_run: row.get(15)?,
+                error: row.get(15)?,
+                last_seen_run: row.get(16)?,
             })
         })?;
 
@@ -170,6 +172,8 @@ impl StateDb {
                                        THEN items.duration_ms ELSE NULL END,
                     captured_at = CASE WHEN items.fingerprint = excluded.fingerprint
                                        THEN items.captured_at ELSE NULL END,
+                    model = CASE WHEN items.fingerprint = excluded.fingerprint
+                                 THEN items.model ELSE NULL END,
                     thumb_path = CASE WHEN items.fingerprint = excluded.fingerprint
                                       THEN items.thumb_path ELSE NULL END,
                     thumb_version = CASE WHEN items.fingerprint = excluded.fingerprint
@@ -203,16 +207,19 @@ impl StateDb {
         height: Option<u32>,
         duration_ms: Option<u64>,
         captured_at: Option<&str>,
+        model: Option<&str>,
     ) -> Result<()> {
         self.conn.execute(
-            "UPDATE items SET width = ?2, height = ?3, duration_ms = ?4, captured_at = ?5
+            "UPDATE items SET width = ?2, height = ?3, duration_ms = ?4, captured_at = ?5,
+                    model = ?6
              WHERE path = ?1",
             params![
                 path,
                 width,
                 height,
                 duration_ms.map(|value| value as i64),
-                captured_at
+                captured_at,
+                model
             ],
         )?;
         Ok(())
@@ -339,6 +346,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
             height        INTEGER,
             duration_ms   INTEGER,
             captured_at   TEXT,
+            model         TEXT,
             thumb_path    TEXT,
             thumb_version TEXT,
             thumb_status  TEXT NOT NULL,
@@ -380,10 +388,30 @@ fn init_schema(conn: &Connection) -> Result<()> {
             )?;
         }
         Some(version) if version == SCHEMA_VERSION.to_string() => {}
+        Some(version) if version == "1" => migrate_v1_to_v2(conn)?,
         Some(version) => bail!(
             "state database schema version {version} is unsupported (expected {SCHEMA_VERSION})"
         ),
     }
+    Ok(())
+}
+
+/// Upgrade a schema-version-1 database. Cached probe fields are cleared once so
+/// unchanged rows are probed again and receive a model; thumbnails stay valid.
+fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
+    conn.execute("ALTER TABLE items ADD COLUMN model TEXT", [])
+        .context("adding model column during state migration")?;
+    conn.execute(
+        "UPDATE items SET width = NULL, height = NULL, duration_ms = NULL,
+                captured_at = NULL, model = NULL",
+        [],
+    )
+    .context("clearing cached probe metadata during state migration")?;
+    conn.execute(
+        "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+        params![SCHEMA_VERSION.to_string()],
+    )
+    .context("updating state schema version")?;
     Ok(())
 }
 
@@ -443,6 +471,7 @@ mod tests {
             Some(80),
             None,
             Some("2024-05-01 10:00:00"),
+            Some("Test Camera"),
         )
         .unwrap();
         db.set_thumb(
@@ -461,6 +490,115 @@ mod tests {
         assert!(item.thumb_path.is_none());
         assert!(item.width.is_none());
         assert!(item.captured_at.is_none());
+        assert!(item.model.is_none());
+    }
+
+    #[test]
+    fn stores_and_reloads_model() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        let mut db = StateDb::open(&path).unwrap();
+        let run = db.start_run("start").unwrap();
+        db.upsert_scanned(&[scanned("2024/05/a.jpg", "10:20")], run)
+            .unwrap();
+        db.set_probe(
+            "2024/05/a.jpg",
+            Some(100),
+            Some(80),
+            None,
+            Some("2024-05-01 10:00:00"),
+            Some("iPhone 15 Pro"),
+        )
+        .unwrap();
+
+        let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+        assert_eq!(item.model.as_deref(), Some("iPhone 15 Pro"));
+    }
+
+    fn v1_database(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (
+                path          TEXT PRIMARY KEY,
+                year          INTEGER NOT NULL,
+                month         INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                size          INTEGER NOT NULL,
+                mtime         INTEGER NOT NULL,
+                fingerprint   TEXT NOT NULL,
+                width         INTEGER,
+                height        INTEGER,
+                duration_ms   INTEGER,
+                captured_at   TEXT,
+                thumb_path    TEXT,
+                thumb_version TEXT,
+                thumb_status  TEXT NOT NULL,
+                error         TEXT,
+                last_seen_run INTEGER NOT NULL
+            );
+            CREATE INDEX items_month ON items(year, month);
+            CREATE TABLE runs (
+                id          INTEGER PRIMARY KEY,
+                started_at  TEXT,
+                finished_at TEXT,
+                status      TEXT,
+                item_count  INTEGER,
+                error_count INTEGER
+            );
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+            INSERT INTO items
+                (path, year, month, kind, size, mtime, fingerprint, width, height,
+                 duration_ms, captured_at, thumb_path, thumb_version, thumb_status,
+                 error, last_seen_run)
+            VALUES
+                ('2024/05/a.jpg', 2024, 5, 'image', 10, 20, '10:20', 100, 80,
+                 NULL, '2024-05-01 10:00:00', 'thumbs/2024/05/a.jpg.webp',
+                 'a-14', 'ok', NULL, 1);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migrates_v1_state_and_clears_probe_metadata_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        v1_database(&path);
+
+        let db = StateDb::open(&path).unwrap();
+        let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+        assert!(item.width.is_none());
+        assert!(item.height.is_none());
+        assert!(item.captured_at.is_none());
+        assert!(item.model.is_none());
+        assert_eq!(item.thumb_status, ThumbStatus::Ok);
+        assert_eq!(item.thumb_version.as_deref(), Some("a-14"));
+
+        let conn = Connection::open(&path).unwrap();
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "2");
+
+        // Reopening an already migrated database must not clear cached metadata again.
+        db.set_probe(
+            "2024/05/a.jpg",
+            Some(100),
+            Some(80),
+            None,
+            Some("2024-05-01 10:00:00"),
+            Some("iPhone 15 Pro"),
+        )
+        .unwrap();
+        drop(db);
+        let db = StateDb::open(&path).unwrap();
+        let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+        assert_eq!(item.width, Some(100));
+        assert_eq!(item.model.as_deref(), Some("iPhone 15 Pro"));
     }
 
     #[test]

@@ -510,6 +510,7 @@ mod tests {
             month,
             kind: MediaKind::Image,
             captured_at: Some(captured_at.to_string()),
+            model: None,
             mtime_ns: 0,
             width: Some(10),
             height: Some(10),
@@ -956,6 +957,7 @@ mod tests {
     fn missing_timestamp_falls_back_to_mtime() {
         let mut catalog = catalog(vec![CatalogItemInput {
             captured_at: None,
+            model: None,
             mtime_ns: 1_714_610_000_000_000_000, // 2024-05-01 ~ in local time
             ..item("2024/05/fallback.jpg", 2024, 5, "2024-05-01 00:00:00")
         }]);

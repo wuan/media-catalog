@@ -16,10 +16,7 @@
       {% if item.is_video %}
       <span class="badge video">Video{% if item.duration_label != "" %} · {{ item.duration_label }}{% endif %}</span>
       {% endif %}
-      <figcaption>
-        <span class="name">{{ item.name }}</span>
-        <time>{{ item.captured_label }}</time>
-      </figcaption>
+      <figcaption><time>{{ item.caption_time }}</time>{% if item.model != "" %}<span class="model">{{ item.model }}</span>{% endif %}</figcaption>
     </a>
   </figure>
   {% endfor %}

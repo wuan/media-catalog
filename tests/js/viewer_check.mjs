@@ -14,6 +14,24 @@ if (!api) {
 
 const album = [{ path: "2024/05/a.jpg" }, { path: "2024/05/b.jpg" }];
 
+const fakeTile = {
+  getAttribute(name) {
+    return {
+      href: "/media/2024/05/a.jpg",
+      "data-item-path": "2024/05/a.jpg",
+      "data-kind": "image",
+      "data-captured": "2024-05-01 10:00:00",
+      "data-thumb-url": "/thumbs/2024/05/a.jpg.webp?v=1",
+      "data-width": "4000",
+      "data-height": "3000"
+    }[name] || null;
+  },
+  querySelector() {
+    return null;
+  }
+};
+const tile = api.tileFromElement(fakeTile);
+
 const result = {
   item: api.parseItemParam("?q=alpha&item=2024/05/a.jpg"),
   noItem: api.parseItemParam("?q=alpha"),
@@ -36,7 +54,10 @@ const result = {
   thresholdNarrow: api.swipeThreshold(200),
   swipeYes: api.isSwipe(150, 10, 1000),
   swipeNo: api.isSwipe(100, 200, 1000),
-  swipeSmall: api.isSwipe(30, 0, 200)
+  swipeSmall: api.isSwipe(30, 0, 200),
+  tileName: tile.name,
+  tileCaptured: tile.captured,
+  tileAlt: tile.alt
 };
 
 console.log(JSON.stringify(result));

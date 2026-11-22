@@ -170,16 +170,19 @@ For each item the catalog records only:
 - width and height (upright)
 - capture timestamp (`YYYY-MM-DD HH:MM:SS`, naive local wall clock)
 - video duration in milliseconds
+- camera model when the source provides one
 - media kind, relative path, thumbnail availability
 
 JPEG capture time comes from EXIF `DateTimeOriginal`; when it is absent, the
 file modification time is used. Videos use ffprobe's `creation_time` when
 present and otherwise the modification time. EXIF timestamps carry no timezone,
 so they are stored as naive local strings for deterministic, unambiguous sorting.
+The camera model comes from JPEG EXIF `Model` or common ffprobe model tags.
 
-GPS coordinates, camera make/model, and other private EXIF fields are never
-extracted or serialized into JSON or rendered pages. Thumbnails are re-encoded
-from pixels and therefore carry no source metadata.
+GPS coordinates, location data, serial numbers, and other private EXIF fields
+are never extracted or serialized into JSON or rendered pages. The camera model
+is published because it appears in tile captions. Thumbnails are re-encoded from
+pixels and therefore carry no source metadata.
 
 ## Events
 
@@ -311,7 +314,8 @@ Catalog pages are rendered per request with Askama:
 Month grids render every item with:
 
 - `loading="lazy"` and `decoding="async"` thumbnails
-- capture date and filename
+- a single-line caption with `YY-MM-DD HH:MM` and the camera model when known
+- filename alternative text on every thumbnail
 - a `Video · duration` marker for videos
 - a direct link to the original under `/media/`
 - a neutral placeholder when no thumbnail exists
@@ -350,7 +354,7 @@ configured it also includes event metadata ordered by newest start and then slug
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "total_items": 2,
   "years": [
     {
@@ -392,7 +396,7 @@ Each `catalog/YYYY.json` shard contains ordered item records:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "year": 2024,
   "items": [
     {
@@ -400,6 +404,7 @@ Each `catalog/YYYY.json` shard contains ordered item records:
       "month": 5,
       "kind": "image",
       "captured_at": "2024-05-01 10:11:12",
+      "model": "iPhone 15 Pro",
       "width": 4032,
       "height": 3024,
       "duration_ms": null,
@@ -415,8 +420,9 @@ Each `catalog/YYYY.json` shard contains ordered item records:
 Event fields are additive: `events` is omitted from the index and from every item
 when no events are configured, and an event's `sections` array is omitted when it
 has no sections. Older catalogs without the fields load as having no events or
-sections, and the schema version is unchanged. Item event slugs are sorted
-independently of the order events appear in `events.toml`. Sections publish
+sections. Item event slugs are sorted independently of the order events appear
+in `events.toml`. The camera model is also optional per item and omitted when
+unknown. Sections publish
 resolved `start`/`end` ranges rather than bookmark timestamps, so the server does
 not depend on the generator's bookmark derivation rule.
 
@@ -489,6 +495,11 @@ unchanged archive produce byte-identical output.
 
 The fingerprint is `size:mtime` (nanosecond modification time), stored in SQLite
 with cached probe metadata and thumbnail status.
+
+Schema version 2 adds the camera model column. Opening a version-1 state database
+migrates it in place and clears cached probe metadata once so unchanged items are
+probed again without regenerating thumbnails. Published catalog JSON is also
+schema version 2, so rebuild the catalog before the updated server accepts it.
 
 On each run:
 

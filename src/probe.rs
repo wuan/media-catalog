@@ -9,20 +9,24 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
 use image::ImageReader;
 
-/// Metadata extracted from an image or video, with no location or camera fields.
+/// Metadata extracted from an image or video, with no location or private camera
+/// fields. The camera model is kept for tile captions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProbeResult {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
     pub captured_at: Option<String>,
+    pub model: Option<String>,
 }
 
-/// EXIF values the catalog is allowed to keep: orientation and capture time only.
+/// EXIF values the catalog is allowed to keep: orientation, capture time, and
+/// camera model.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExifMetadata {
     pub orientation: Option<u16>,
     pub captured_at: Option<String>,
+    pub model: Option<String>,
 }
 
 /// Check that `ffmpeg` and `ffprobe` are available before any scanning happens.
@@ -77,6 +81,7 @@ pub fn probe_image(path: &Path, mtime_ns: i64) -> Result<ProbeResult> {
             exif.captured_at
                 .unwrap_or_else(|| timestamp_from_nanos(mtime_ns)),
         ),
+        model: exif.model,
     })
 }
 
@@ -156,6 +161,7 @@ pub fn probe_video(path: &Path, mtime_ns: i64) -> Result<ProbeResult> {
         height,
         duration_ms,
         captured_at: Some(captured_at),
+        model: video_model(&json, video_stream),
     })
 }
 
@@ -177,6 +183,25 @@ fn creation_time(json: &serde_json::Value, stream: Option<&serde_json::Value>) -
             .format("%Y-%m-%d %H:%M:%S")
             .to_string()
     })
+}
+
+/// Pick a camera model from common ffprobe tags, preferring format over stream
+/// tags and QuickTime's namespaced key over the generic one.
+fn video_model(json: &serde_json::Value, stream: Option<&serde_json::Value>) -> Option<String> {
+    let tag_sets = [
+        json.get("format").and_then(|format| format.get("tags")),
+        stream.and_then(|stream| stream.get("tags")),
+    ];
+    for tags in tag_sets.into_iter().flatten() {
+        for key in ["com.apple.quicktime.model", "model"] {
+            if let Some(raw) = tags.get(key).and_then(|value| value.as_str()) {
+                if let Some(model) = normalize_model(raw) {
+                    return Some(model);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn video_rotation(stream: &serde_json::Value) -> f64 {
@@ -340,7 +365,7 @@ fn parse_tiff(data: &[u8]) -> Option<ExifMetadata> {
     let ifd0_offset = reader.u32(4)? as usize;
 
     let mut metadata = ExifMetadata::default();
-    let (orientation_entry, exif_ifd_entry, date_time_entry) =
+    let (orientation_entry, model_entry, exif_ifd_entry, date_time_entry) =
         find_ifd0_entries(&reader, ifd0_offset)?;
 
     if let Some(entry) = orientation_entry {
@@ -348,6 +373,10 @@ fn parse_tiff(data: &[u8]) -> Option<ExifMetadata> {
         if (1..=8).contains(&orientation) {
             metadata.orientation = Some(orientation);
         }
+    }
+
+    if let Some(entry) = model_entry {
+        metadata.model = read_ascii_value(&reader, entry).and_then(|raw| normalize_model(&raw));
     }
 
     let mut timestamp = None;
@@ -368,27 +397,29 @@ fn parse_tiff(data: &[u8]) -> Option<ExifMetadata> {
     Some(metadata)
 }
 
-/// Returns (orientation entry offset, ExifIFD pointer entry offset, DateTime entry offset).
+/// Returns (orientation entry offset, model entry offset, ExifIFD pointer entry offset, DateTime entry offset).
 fn find_ifd0_entries(
     reader: &TiffReader<'_>,
     offset: usize,
-) -> Option<(Option<usize>, Option<usize>, Option<usize>)> {
+) -> Option<(Option<usize>, Option<usize>, Option<usize>, Option<usize>)> {
     let count = reader.u16(offset)? as usize;
     let entries_start = offset + 2;
     let mut orientation = None;
+    let mut model = None;
     let mut exif_ifd = None;
     let mut date_time = None;
     for index in 0..count {
         let entry = entries_start + index * 12;
         let tag = reader.u16(entry)?;
         match tag {
+            0x0110 => model = Some(entry),
             0x0112 => orientation = Some(entry),
             0x8769 => exif_ifd = Some(entry),
             0x0132 => date_time = Some(entry),
             _ => {}
         }
     }
-    Some((orientation, exif_ifd, date_time))
+    Some((orientation, model, exif_ifd, date_time))
 }
 
 /// Returns (DateTimeOriginal entry offset, DateTimeDigitized entry offset).
@@ -435,6 +466,16 @@ fn read_ascii_value(reader: &TiffReader<'_>, entry: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&text).to_string())
 }
 
+/// Collapse whitespace so a model string always fits on one caption line.
+fn normalize_model(raw: &str) -> Option<String> {
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
 fn normalize_exif_timestamp(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let parsed = NaiveDateTime::parse_from_str(trimmed, "%Y:%m:%d %H:%M:%S").ok()?;
@@ -456,18 +497,43 @@ mod tests {
         image.save(path).unwrap();
     }
 
-    fn tiff_with(orientation: Option<u16>, datetime: Option<&str>) -> Vec<u8> {
+    fn tiff_with(orientation: Option<u16>, datetime: Option<&str>, model: Option<&str>) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend_from_slice(b"II");
         data.extend_from_slice(&42u16.to_le_bytes());
         data.extend_from_slice(&8u32.to_le_bytes());
 
-        let include_exif = datetime.is_some();
-        let ifd0_entries = 1 + include_exif as usize;
+        let datetime_bytes = datetime.map(|text| {
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            bytes
+        });
+        let model_bytes = model.map(|text| {
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            bytes
+        });
+        let include_exif = datetime_bytes.is_some();
+        let ifd0_entries = 1 + include_exif as usize + model_bytes.is_some() as usize;
         let ifd0_size = 2 + ifd0_entries * 12 + 4;
         let exif_ifd_offset = 8 + ifd0_size;
         let exif_ifd_size = 2 + 12 + 4;
-        let datetime_offset = exif_ifd_offset + exif_ifd_size;
+        let data_offset = exif_ifd_offset + include_exif as usize * exif_ifd_size;
+        let datetime_offset = if include_exif {
+            Some(data_offset)
+        } else {
+            None
+        };
+        let model_offset = model_bytes
+            .as_ref()
+            .filter(|bytes| bytes.len() > 4)
+            .map(|_| {
+                data_offset
+                    + datetime_bytes
+                        .as_ref()
+                        .map(|value| value.len())
+                        .unwrap_or(0)
+            });
 
         data.extend_from_slice(&(ifd0_entries as u16).to_le_bytes());
         // Orientation, type SHORT, count 1, inline.
@@ -476,6 +542,18 @@ mod tests {
         data.extend_from_slice(&1u32.to_le_bytes());
         data.extend_from_slice(&orientation.unwrap_or(1).to_le_bytes());
         data.extend_from_slice(&0u16.to_le_bytes());
+        if let Some(bytes) = &model_bytes {
+            data.extend_from_slice(&0x0110u16.to_le_bytes());
+            data.extend_from_slice(&2u16.to_le_bytes());
+            data.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            if bytes.len() <= 4 {
+                let mut inline = [0u8; 4];
+                inline[..bytes.len()].copy_from_slice(bytes);
+                data.extend_from_slice(&inline);
+            } else {
+                data.extend_from_slice(&(model_offset.unwrap() as u32).to_le_bytes());
+            }
+        }
         if include_exif {
             data.extend_from_slice(&0x8769u16.to_le_bytes());
             data.extend_from_slice(&4u16.to_le_bytes());
@@ -484,26 +562,37 @@ mod tests {
         }
         data.extend_from_slice(&0u32.to_le_bytes()); // next IFD
 
-        if include_exif {
+        if let (Some(bytes), Some(offset)) = (&datetime_bytes, datetime_offset) {
             data.extend_from_slice(&1u16.to_le_bytes());
             data.extend_from_slice(&0x9003u16.to_le_bytes());
             data.extend_from_slice(&2u16.to_le_bytes());
-            data.extend_from_slice(&20u32.to_le_bytes());
-            data.extend_from_slice(&(datetime_offset as u32).to_le_bytes());
+            data.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            data.extend_from_slice(&(offset as u32).to_le_bytes());
             data.extend_from_slice(&0u32.to_le_bytes()); // next IFD
-            let mut text = datetime.unwrap().as_bytes().to_vec();
-            text.resize(20, 0);
-            data.extend_from_slice(&text);
+        }
+
+        if let (Some(bytes), Some(offset)) = (&datetime_bytes, datetime_offset) {
+            debug_assert_eq!(data.len(), offset);
+            data.extend_from_slice(bytes);
+        }
+        if let (Some(bytes), Some(offset)) = (&model_bytes, model_offset) {
+            debug_assert_eq!(data.len(), offset);
+            data.extend_from_slice(bytes);
         }
         data
     }
 
-    fn jpeg_with_exif(path: &Path, orientation: Option<u16>, datetime: Option<&str>) {
+    fn jpeg_with_exif(
+        path: &Path,
+        orientation: Option<u16>,
+        datetime: Option<&str>,
+        model: Option<&str>,
+    ) {
         let temp = tempfile::tempdir().unwrap();
         let plain = temp.path().join("plain.jpg");
         write_plain_jpeg(&plain, 40, 20);
         let jpeg = std::fs::read(plain).unwrap();
-        let tiff = tiff_with(orientation, datetime);
+        let tiff = tiff_with(orientation, datetime, model);
         let mut app1 = Vec::new();
         app1.extend_from_slice(&[0xFF, 0xE1]);
         let length = (2 + 6 + tiff.len()) as u16;
@@ -525,10 +614,60 @@ mod tests {
     fn parses_orientation_and_capture_time() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("tagged.jpg");
-        jpeg_with_exif(&path, Some(6), Some("2024:05:01 10:11:12"));
+        jpeg_with_exif(&path, Some(6), Some("2024:05:01 10:11:12"), None);
         let metadata = read_jpeg_exif(&path).unwrap();
         assert_eq!(metadata.orientation, Some(6));
         assert_eq!(metadata.captured_at.as_deref(), Some("2024-05-01 10:11:12"));
+        assert_eq!(metadata.model, None);
+    }
+
+    #[test]
+    fn parses_and_normalizes_model() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("model.jpg");
+        jpeg_with_exif(
+            &path,
+            Some(1),
+            Some("2024:05:01 10:11:12"),
+            Some("  iPhone   15 Pro  "),
+        );
+        let metadata = read_jpeg_exif(&path).unwrap();
+        assert_eq!(metadata.model.as_deref(), Some("iPhone 15 Pro"));
+
+        let result = probe_image(&path, 0).unwrap();
+        assert_eq!(result.model.as_deref(), Some("iPhone 15 Pro"));
+    }
+
+    #[test]
+    fn empty_model_is_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("empty-model.jpg");
+        jpeg_with_exif(&path, Some(1), None, Some("   "));
+        let metadata = read_jpeg_exif(&path).unwrap();
+        assert_eq!(metadata.model, None);
+    }
+
+    #[test]
+    fn reads_model_from_video_tags_without_private_fields() {
+        let json = serde_json::json!({
+            "format": {
+                "tags": {
+                    "com.apple.quicktime.model": "  iPhone   15 Pro ",
+                    "gps": "52.5,13.4",
+                    "serial": "ABC123"
+                }
+            }
+        });
+        assert_eq!(video_model(&json, None).as_deref(), Some("iPhone 15 Pro"));
+
+        let stream = serde_json::json!({"tags": {"model": "Canon EOS R6"}});
+        assert_eq!(
+            video_model(&serde_json::json!({}), Some(&stream)).as_deref(),
+            Some("Canon EOS R6")
+        );
+
+        let none = serde_json::json!({"format": {"tags": {"gps": "52.5"}}});
+        assert_eq!(video_model(&none, None), None);
     }
 
     #[test]
@@ -552,7 +691,7 @@ mod tests {
     fn rotated_tagged_image_reports_upright_dimensions() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("rotated.jpg");
-        jpeg_with_exif(&path, Some(6), Some("2024:05:01 10:11:12"));
+        jpeg_with_exif(&path, Some(6), Some("2024:05:01 10:11:12"), None);
         let result = probe_image(&path, 0).unwrap();
         assert_eq!(result.width, Some(20));
         assert_eq!(result.height, Some(40));
