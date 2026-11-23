@@ -296,7 +296,8 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     });
     probe_progress.finish();
 
-    let errors_before_probe = summary.errors.len();
+    summary.probes_attempted = probe_work.len();
+    let mut failed_probes = Vec::new();
     for outcome in probe_results {
         match outcome.result {
             Ok(result) => {
@@ -312,15 +313,22 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
                     },
                 )?;
                 push_error(&mut summary, &outcome.rel_path, &format!("{error:#}"));
+                failed_probes.push((outcome.rel_path, error.root_cause().to_string()));
             }
         }
     }
 
-    let probe_failures = summary.errors.len().saturating_sub(errors_before_probe);
+    let probe_failures = failed_probes.len();
+    summary.probe_failures = report::group_probe_failures(failed_probes);
+    summary.probe_warning =
+        report::systemic_probe_warning(summary.probes_attempted, probe_failures);
     progress.phase(format!(
         "Probed {} items ({} failed)",
         summary.probed, probe_failures
     ));
+    if let Some(warning) = &summary.probe_warning {
+        progress.phase(format!("Warning: {warning}"));
+    }
 
     let records_after_probe = database.load_items()?;
 

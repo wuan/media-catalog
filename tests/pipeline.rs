@@ -1007,3 +1007,166 @@ fn events_only_still_holds_the_build_lock() {
 
     drop(lock);
 }
+
+fn shard_item(fixture: &Fixture, path: &str) -> Value {
+    let shard: Value = serde_json::from_str(&fixture.read_json("catalog/2024.json")).unwrap();
+    shard["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == path)
+        .cloned()
+        .unwrap_or_else(|| panic!("{path} missing from shard"))
+}
+
+/// Make `path` unreadable; returns false (and restores it) when the current
+/// user can still open it, e.g. when running as root.
+#[cfg(unix)]
+fn lock_source(path: &std::path::Path) -> bool {
+    set_readable(path, false);
+    if std::fs::File::open(path).is_ok() {
+        set_readable(path, true);
+        return false;
+    }
+    true
+}
+
+#[test]
+fn corrupt_jpeg_is_reported_as_a_grouped_probe_failure() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+    fixture.write_image("2024/05/b.jpg", 20, 20, 2);
+    fixture.write_bytes("2024/05/broken.jpg", b"this is not a jpeg");
+
+    let outcome = run_with_config(fixture.config()).unwrap();
+    let summary = &outcome.summary;
+    assert!(summary.has_errors());
+    assert_eq!(summary.probes_attempted, 3);
+    assert_eq!(summary.probe_failure_count(), 1);
+    assert_eq!(summary.probe_failures.len(), 1);
+    let group = &summary.probe_failures[0];
+    assert_eq!(group.samples, ["2024/05/broken.jpg"]);
+    assert!(
+        group.cause.to_ascii_lowercase().contains("pars"),
+        "expected a decode cause: {}",
+        group.cause
+    );
+    assert!(
+        !group.cause.contains("broken.jpg"),
+        "cause should not embed the path: {}",
+        group.cause
+    );
+    assert!(summary
+        .errors
+        .iter()
+        .any(|failure| failure.path == "2024/05/broken.jpg"));
+    assert!(summary.probe_warning.is_none());
+
+    let rendered = summary.render();
+    assert!(rendered.contains("Probe failures: 1 of 3"), "{rendered}");
+    assert!(
+        rendered.contains(&format!("  - {}: 1 (e.g. 2024/05/broken.jpg)", group.cause)),
+        "{rendered}"
+    );
+
+    let broken = shard_item(&fixture, "2024/05/broken.jpg");
+    assert!(broken
+        .get("captured_at")
+        .is_some_and(|value| !value.is_null()));
+}
+
+#[cfg(unix)]
+#[test]
+fn systemic_probe_failure_prints_a_warning() {
+    let fixture = Fixture::new();
+    let paths = [
+        "2024/05/a.jpg",
+        "2024/05/b.jpg",
+        "2024/05/c.jpg",
+        "2024/05/d.jpg",
+    ];
+    for (seed, rel) in paths.iter().enumerate() {
+        fixture.write_image(rel, 20, 20, seed as u8);
+    }
+    for rel in paths {
+        if !lock_source(&fixture.media_path(rel)) {
+            eprintln!("skipping systemic probe test: unreadable files stay readable");
+            return;
+        }
+    }
+
+    let outcome = run_with_config(fixture.config()).unwrap();
+    for rel in paths {
+        set_readable(&fixture.media_path(rel), true);
+    }
+    let summary = &outcome.summary;
+    assert!(summary.has_errors(), "run must exit non-zero");
+    assert_eq!(summary.probes_attempted, 4);
+    assert_eq!(summary.probe_failure_count(), 4);
+    assert_eq!(summary.probe_failures.len(), 1);
+    assert_eq!(summary.probe_failures[0].samples.len(), 3);
+
+    let rendered = summary.render();
+    println!("{rendered}");
+    assert!(rendered.contains("Probe failures: 4 of 4"), "{rendered}");
+    assert!(
+        rendered.contains("Warning: 4 of 4 probes failed. The originals are probably unreadable"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("dimensions and camera metadata"));
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_probe_is_retried_once_the_source_is_readable() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/rotated.jpg",
+        Some(6),
+        Some("2024:05:01 10:11:12"),
+        false,
+    );
+    let source = fixture.media_path("2024/05/rotated.jpg");
+    let before = std::fs::metadata(&source).unwrap();
+    if !lock_source(&source) {
+        eprintln!("skipping probe retry test: unreadable files stay readable");
+        return;
+    }
+
+    let first = run_with_config(fixture.config()).unwrap();
+    set_readable(&source, true);
+    assert_eq!(first.summary.probes_attempted, 1);
+    assert_eq!(first.summary.probe_failure_count(), 1);
+    let item = shard_item(&fixture, "2024/05/rotated.jpg");
+    assert!(item.get("width").is_none_or(Value::is_null), "{item}");
+
+    let after = std::fs::metadata(&source).unwrap();
+    assert_eq!(after.len(), before.len());
+    assert_eq!(
+        fingerprint::mtime_nanos(&after),
+        fingerprint::mtime_nanos(&before)
+    );
+
+    let second = run_with_config(fixture.config()).unwrap();
+    assert!(
+        second.summary.errors.is_empty(),
+        "{:?}",
+        second.summary.errors
+    );
+    assert_eq!(second.summary.unchanged, 1);
+    assert_eq!(second.summary.probes_attempted, 1);
+    assert_eq!(second.summary.probed, 1);
+    assert!(second.summary.render().contains("Probe failures: 0 of 1"));
+    let item = shard_item(&fixture, "2024/05/rotated.jpg");
+    assert_eq!(item["width"], 20);
+    assert_eq!(item["height"], 40);
+    assert_eq!(item["captured_at"], "2024-05-01 10:11:12");
+    assert_eq!(item["f_number"], 1.8);
+    assert_eq!(item["iso"], 100);
+
+    let third = run_with_config(fixture.config()).unwrap();
+    assert!(third.summary.errors.is_empty());
+    assert_eq!(third.summary.probes_attempted, 0);
+    assert_eq!(third.summary.probed, 0);
+    assert!(third.summary.render().contains("Probe failures: 0 of 0"));
+}

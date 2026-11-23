@@ -772,6 +772,27 @@ its matched item count. Events that match more than 500 items add a warning.
 Exit status is nonzero for configuration errors, any per-item failure, or a
 blocked mount-drop guard.
 
+Probe failures get their own lines after `Probed:`, grouped by root cause and
+ordered by count, with up to three sample paths per cause (at most 10 causes
+are listed). When at least 4 probes were attempted and half or more of them
+failed, the summary also prints a warning, because the originals are then
+probably unreadable in this environment:
+
+```text
+Probed: 0
+Probe failures: 4 of 4
+  - Permission denied (os error 13): 4 (e.g. 2024/05/a.jpg, 2024/05/b.jpg, 2024/05/c.jpg)
+...
+Warning: 4 of 4 probes failed. The originals are probably unreadable in this environment, so the published catalog will lack dimensions and camera metadata for those items. Fix access to the media root and re-run to probe them again.
+```
+
+A run with no failures shows a single `Probe failures: 0 of N` line. Items
+whose probe failed keep their file modification time as capture time and are
+published without dimensions or camera metadata. Images and videos that can be
+decoded are probed again on every run until a probe succeeds, so fixing access
+to the originals and re-running is enough to recover; no state reset is
+needed. Each failure still appears with its full message under `Errors:`.
+
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
