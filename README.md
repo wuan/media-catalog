@@ -298,8 +298,8 @@ The next full run cleans up normally, as if the events-only run had not
 happened.
 
 Event pages group items by authored section in chronological order when sections
-are configured; otherwise they group items by folder month, newest month and
-newest item first. Month headings link to the normal `/YYYY/MM/` pages. A
+are configured; otherwise they group items by folder month, oldest month and
+oldest item first. Month headings link to the normal `/YYYY/MM/` pages. A
 sectioned page includes in-page navigation to each non-empty section, and
 sections whose ranges match no items are omitted from both the page and its
 navigation. Items outside every published section appear in an "Other" bucket

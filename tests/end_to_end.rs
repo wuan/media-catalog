@@ -187,7 +187,7 @@ description = "A crossing event."
     let (status, _, body) = send(&app, Method::GET, "/events/may-trip/", Vec::new()).await;
     assert_eq!(status, StatusCode::OK);
     let event = html(&body);
-    assert!(event.find("June 2024").unwrap() < event.find("May 2024").unwrap());
+    assert!(event.find("May 2024").unwrap() < event.find("June 2024").unwrap());
     assert!(event.contains("alpha.jpg"));
     assert!(event.contains("beta.jpg"));
     assert!(!event.contains("outside.jpg"));

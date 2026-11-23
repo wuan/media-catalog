@@ -389,8 +389,8 @@ async fn renders_event_routes_as_a_second_browsing_axis() {
     assert_eq!(header_value(&headers, header::CACHE_CONTROL), "no-cache");
     let event = String::from_utf8_lossy(&body);
     assert!(event.contains("<h1>May trip</h1>"));
-    // Event month groups stay folder-authoritative and newest first.
-    assert!(event.find("June 2024").unwrap() < event.find("May 2024").unwrap());
+    // Event month groups stay folder-authoritative and oldest first.
+    assert!(event.find("May 2024").unwrap() < event.find("June 2024").unwrap());
     assert!(event.contains("href=\"/2024/06/\""));
     assert!(event.contains("href=\"/2024/05/\""));
 

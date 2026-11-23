@@ -397,6 +397,9 @@ pub fn build_event_views(catalog: &Catalog, events: &[EventMeta]) -> Result<Vec<
             }
         }
 
+        // Month groups follow the same oldest-first direction as the items they contain.
+        months.sort_by_key(|month| (month.year, month.month));
+
         let count = months.iter().map(|month| month.items.len()).sum::<usize>();
         if count != event.item_count {
             bail!(
@@ -982,6 +985,51 @@ mod tests {
     }
 
     #[test]
+    fn event_month_groups_are_ordered_oldest_first() {
+        let mut catalog = catalog(vec![
+            item("2024/06/b.jpg", 2024, 6, "2024-06-02 10:00:00"),
+            item("2024/05/a.jpg", 2024, 5, "2024-05-03 10:00:00"),
+        ]);
+        attach_events(
+            &mut catalog,
+            vec![event("trip", "2024-05-01 00:00", "2024-06-30 23:59")],
+        )
+        .unwrap();
+
+        let months = catalog
+            .event("trip")
+            .unwrap()
+            .months
+            .iter()
+            .map(|month| format!("{}-{:02}", month.year, month.month))
+            .collect::<Vec<_>>();
+        assert_eq!(months, vec!["2024-05", "2024-06"]);
+    }
+
+    #[test]
+    fn event_month_groups_sort_by_year_then_month() {
+        let mut catalog = catalog(vec![
+            item("2024/02/c.jpg", 2024, 2, "2024-02-05 10:00:00"),
+            item("2024/01/b.jpg", 2024, 1, "2024-01-10 10:00:00"),
+            item("2023/12/a.jpg", 2023, 12, "2023-12-20 10:00:00"),
+        ]);
+        attach_events(
+            &mut catalog,
+            vec![event("winter", "2023-12-01 00:00", "2024-02-28 23:59")],
+        )
+        .unwrap();
+
+        let months = catalog
+            .event("winter")
+            .unwrap()
+            .months
+            .iter()
+            .map(|month| format!("{}-{:02}", month.year, month.month))
+            .collect::<Vec<_>>();
+        assert_eq!(months, vec!["2023-12", "2024-01", "2024-02"]);
+    }
+
+    #[test]
     fn events_and_items_are_ordered_deterministically() {
         let mut catalog = catalog(vec![
             item("2024/05/a.jpg", 2024, 5, "2024-05-03 10:00:00"),
@@ -1012,8 +1060,8 @@ mod tests {
             .iter()
             .map(|month| format!("{}-{:02}", month.year, month.month))
             .collect::<Vec<_>>();
-        assert_eq!(months, vec!["2024-06", "2024-05"]);
-        let june = newer.months[0]
+        assert_eq!(months, vec!["2024-05", "2024-06"]);
+        let june = newer.months[1]
             .items
             .iter()
             .map(|item| item.path.as_str())

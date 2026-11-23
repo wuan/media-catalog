@@ -812,26 +812,26 @@ mod tests {
     }
 
     #[test]
-    fn event_page_groups_months_newest_first_and_links_month_pages() {
+    fn event_page_groups_months_oldest_first_and_links_month_pages() {
         let catalog = cross_month_catalog();
         let html = render_event(&catalog, "may-trip").unwrap().unwrap();
         assert!(html.contains("<h1>May trip</h1>"));
         assert!(html.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
         assert!(html.contains("A crossing event."));
 
-        let june = html.find("June 2024").expect("June heading");
         let may = html.find("May 2024").expect("May heading");
-        assert!(june < may);
-        assert!(html.contains("href=\"/2024/06/\""));
+        let june = html.find("June 2024").expect("June heading");
+        assert!(may < june);
         assert!(html.contains("href=\"/2024/05/\""));
+        assert!(html.contains("href=\"/2024/06/\""));
 
-        let june_item = html
-            .find("href=\"/media/2024/06/b.jpg\"")
-            .expect("June item");
         let may_item = html
             .find("href=\"/media/2024/05/a.jpg\"")
             .expect("May item");
-        assert!(june_item < may_item);
+        let june_item = html
+            .find("href=\"/media/2024/06/b.jpg\"")
+            .expect("June item");
+        assert!(may_item < june_item);
         assert_eq!(html.matches("loading=\"lazy\"").count(), 2);
         assert_eq!(html.matches("/assets/viewer.js").count(), 1);
         assert!(!html.contains("<script>"));

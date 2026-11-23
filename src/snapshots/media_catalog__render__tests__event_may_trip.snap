@@ -31,34 +31,6 @@ expression: html
     
     <section class="month-section">
       <h2>
-        <a href="/2024/06/">June 2024</a>
-        <span class="count">1 items</span>
-      </h2>
-      
-      <div class="grid">
-  
-  <figure class="tile">
-    <a class="tile-link" href="/media/2024/06/b.jpg"
-      data-item-path="2024/06/b.jpg"
-      data-kind="image"
-      data-captured="2024-06-02 10:00:00"
-      data-size="0"
-      data-thumb-url="/thumbs/2024/06/b.jpg.webp?v=10-20"
-      data-width="4000"
-      data-height="3000">
-      
-      <img src="/thumbs/2024/06/b.jpg.webp?v=10-20" alt="b.jpg" loading="lazy" decoding="async">
-      
-      
-      <figcaption><time>24-06-02 10:00</time></figcaption>
-    </a>
-  </figure>
-  
-</div>
-    </section>
-    
-    <section class="month-section">
-      <h2>
         <a href="/2024/05/">May 2024</a>
         <span class="count">1 items</span>
       </h2>
@@ -79,6 +51,34 @@ expression: html
       
       
       <figcaption><time>24-05-30 10:00</time></figcaption>
+    </a>
+  </figure>
+  
+</div>
+    </section>
+    
+    <section class="month-section">
+      <h2>
+        <a href="/2024/06/">June 2024</a>
+        <span class="count">1 items</span>
+      </h2>
+      
+      <div class="grid">
+  
+  <figure class="tile">
+    <a class="tile-link" href="/media/2024/06/b.jpg"
+      data-item-path="2024/06/b.jpg"
+      data-kind="image"
+      data-captured="2024-06-02 10:00:00"
+      data-size="0"
+      data-thumb-url="/thumbs/2024/06/b.jpg.webp?v=10-20"
+      data-width="4000"
+      data-height="3000">
+      
+      <img src="/thumbs/2024/06/b.jpg.webp?v=10-20" alt="b.jpg" loading="lazy" decoding="async">
+      
+      
+      <figcaption><time>24-06-02 10:00</time></figcaption>
     </a>
   </figure>
   
