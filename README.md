@@ -674,3 +674,7 @@ rows, pruned files, per-item errors, elapsed time, and each configured event wit
 its matched item count. Events that match more than 500 items add a warning.
 Exit status is nonzero for configuration errors, any per-item failure, or a
 blocked mount-drop guard.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
