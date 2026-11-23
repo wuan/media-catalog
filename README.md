@@ -533,6 +533,11 @@ or keyboard activation opens the item in a modal dialog instead of navigating
 away; modifier clicks, middle clicks, and new-tab gestures keep the original tile
 link behavior.
 
+- **Controls:** every action is an icon-only control — close, previous, next,
+  play/pause, zoom out/in, reset zoom, immersive, and open original. The icons
+  are a vendored subset of Lucide with no icon font or extra request. Each
+  control keeps an accessible name and shows the same text as a hover/focus
+  tooltip; play/pause and immersive swap icons when their pressed state changes.
 - **Album scope:** tiles are collected from the live page in document order, so a
   month page covers that month, a sectioned event page covers every authored
   section and the Other bucket, and a search page covers the current filtered
@@ -546,23 +551,23 @@ link behavior.
   are omitted. When the catalog was built with `--include-location`, the
   coordinates appear with a link that opens the point on OpenStreetMap in a new
   tab; no map request happens until the link is activated.
-- **Navigation:** use the Previous/Next controls, the Left/Right arrow keys, or a
-  horizontal swipe while an image is at fit scale. Arrow keys keep navigating
-  while an image is zoomed.
-- **Immersive mode:** use the Immersive control or press `f` to fill the window.
+- **Navigation:** use the previous and next controls, the Left/Right arrow keys,
+  or a horizontal swipe while an image is at fit scale. Arrow keys keep
+  navigating while an image is zoomed.
+- **Immersive mode:** use the immersive control or press `f` to fill the window.
   The stage spans the whole window, so images and videos are fitted to the
   maximum available area. The top, control, and caption chrome sits above the
   stage with a translucent gradient backing and hides after a short idle; it
   returns on pointer movement, a tap, the wheel, a key press, or keyboard focus
   without resizing the stage. Escape leaves immersive mode first and closes the
   viewer on the next press.
-- **Slideshow:** press Play or `s` to advance through the album every 5 seconds.
-  Playback never starts on its own, stops on the last item, and restarts from the
-  first item when Play is pressed on the last item. Manual navigation, zoom,
-  pan, opening the original, or switching tabs pauses it until Play is pressed
-  again. A video pauses playback and waits for the visitor; pressing Play on a
-  video advances to the next item and resumes there. Closing the viewer clears
-  the timer, so reopening always starts paused.
+- **Slideshow:** press the play control or `s` to advance through the album every
+  5 seconds. Playback never starts on its own, stops on the last item, and
+  restarts from the first item when play is pressed on the last item. Manual
+  navigation, zoom, pan, opening the original, or switching tabs pauses it until
+  play is pressed again. A video pauses playback and waits for the visitor;
+  pressing play on a video advances to the next item and resumes there. Closing
+  the viewer clears the timer, so reopening always starts paused.
 - **Images:** the thumbnail is shown while the original loads, each newly opened
   item starts at fit scale, and pinch, wheel, double-tap/double-click, and
   `+`/`-`/`0` zoom with panning clamped to the viewport. Zoom resets when
@@ -578,12 +583,14 @@ link behavior.
   browser Back does not step through images. Search filter parameters are
   preserved alongside `item`; a stale item path opens nothing and leaves the
   grid usable.
-- **Accessibility:** the viewer is a modal dialog with labelled controls, focus
-  containment, an announced current position, and reduced-motion styles. The
-  play/pause and immersive controls are keyboard reachable and report their
-  pressed state. Automatic advances update the position quietly; live
-  announcements return when playback is paused. Hidden immersive chrome comes
-  back on Tab, and focus stays inside the viewer.
+- **Accessibility:** the viewer is a modal dialog with labelled icon-only
+  controls, focus containment, an announced current position, and reduced-motion
+  styles. Each icon keeps the control's accessible name and adds a hover/focus
+  tooltip with the same text. The play/pause and immersive controls are keyboard
+  reachable, report their pressed state, and swap icons with that state.
+  Automatic advances update the position quietly; live announcements return when
+  playback is paused. Hidden immersive chrome comes back on Tab, and focus stays
+  inside the viewer.
 - **Fallback:** tile anchors stay regular links to `/media/`. If the viewer
   script is unavailable or fails to initialize, tiles continue to open the
   original file directly.
@@ -604,17 +611,19 @@ Browser verification checklist for the video and focus paths:
   confirm the pointer or Tab reveals it without resizing the stage.
 - Press Escape in immersive mode and confirm the viewer stays open; press Escape
   again and confirm it closes.
-- Start the slideshow with Play and `s`; confirm it advances every 5 seconds,
-  stops on the last item, and restarts from the first when Play is pressed there.
+- Start the slideshow with the play control and `s`; confirm it advances every
+  5 seconds, stops on the last item, and restarts from the first when play is
+  pressed there.
 - Navigate manually or zoom during playback and confirm it pauses; switch tabs
-  and confirm it stays paused until Play is pressed.
+  and confirm it stays paused until play is pressed.
 - With a mixed album, let the slideshow reach a video and confirm it pauses
-  without autoplaying; press Play and confirm it advances and resumes.
+  without autoplaying; press play and confirm it advances and resumes.
 - Close the viewer mid-playback and reopen it from a tile and from `?item=`;
   confirm it starts paused and no timer fires.
-- Use only the keyboard: Tab to Play and Immersive, confirm their pressed state,
-  toggle both, and confirm Tab reveals hidden immersive chrome. Start playback
-  and confirm the position line does not announce every automatic advance.
+- Use only the keyboard: Tab to the play and immersive controls, confirm their
+  pressed state, toggle both, and confirm Tab reveals hidden immersive chrome.
+  Start playback and confirm the position line does not announce every automatic
+  advance.
 - Enable the reduced-motion preference and confirm the viewer still hides and
   reveals chrome and the slideshow remains usable.
 - Focus the video player and press Left/Right to confirm native seeking; move

@@ -13,6 +13,91 @@
   var SLIDESHOW_INTERVAL_MS = 5000;
   // Hide immersive chrome after this much pointer, touch, and keyboard idle.
   var IDLE_CHROME_MS = 2500;
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  // Icon geometry is a vendored subset of Lucide (ISC; the Feather-derived
+  // icons are MIT). Name keys match lucide.dev icon names. See
+  // THIRD_PARTY_NOTICES.md for the notices.
+  var ICONS = {
+    x: [
+      { tag: "path", attrs: { d: "M18 6 6 18" } },
+      { tag: "path", attrs: { d: "m6 6 12 12" } }
+    ],
+    "chevron-left": [{ tag: "path", attrs: { d: "m15 18-6-6 6-6" } }],
+    "chevron-right": [{ tag: "path", attrs: { d: "m9 18 6-6-6-6" } }],
+    play: [{ tag: "polygon", attrs: { points: "6 3 20 12 6 21 6 3" } }],
+    pause: [
+      { tag: "rect", attrs: { x: 14, y: 4, width: 4, height: 16, rx: 1 } },
+      { tag: "rect", attrs: { x: 6, y: 4, width: 4, height: 16, rx: 1 } }
+    ],
+    "zoom-out": [
+      { tag: "circle", attrs: { cx: 11, cy: 11, r: 8 } },
+      { tag: "line", attrs: { x1: 21, x2: 16.65, y1: 21, y2: 16.65 } },
+      { tag: "line", attrs: { x1: 8, x2: 14, y1: 11, y2: 11 } }
+    ],
+    "zoom-in": [
+      { tag: "circle", attrs: { cx: 11, cy: 11, r: 8 } },
+      { tag: "line", attrs: { x1: 21, x2: 16.65, y1: 21, y2: 16.65 } },
+      { tag: "line", attrs: { x1: 11, x2: 11, y1: 8, y2: 14 } },
+      { tag: "line", attrs: { x1: 8, x2: 14, y1: 11, y2: 11 } }
+    ],
+    "rotate-ccw": [
+      {
+        tag: "path",
+        attrs: { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
+      },
+      { tag: "path", attrs: { d: "M3 3v5h5" } }
+    ],
+    maximize: [
+      { tag: "path", attrs: { d: "M8 3H5a2 2 0 0 0-2 2v3" } },
+      { tag: "path", attrs: { d: "M21 8V5a2 2 0 0 0-2-2h-3" } },
+      { tag: "path", attrs: { d: "M3 16v3a2 2 0 0 0 2 2h3" } },
+      { tag: "path", attrs: { d: "M16 21h3a2 2 0 0 0 2-2v-3" } }
+    ],
+    minimize: [
+      { tag: "path", attrs: { d: "M8 3v3a2 2 0 0 1-2 2H3" } },
+      { tag: "path", attrs: { d: "M21 8h-3a2 2 0 0 1-2-2V3" } },
+      { tag: "path", attrs: { d: "M3 16h3a2 2 0 0 1 2 2v3" } },
+      { tag: "path", attrs: { d: "M16 21v-3a2 2 0 0 1 2-2h3" } }
+    ],
+    "external-link": [
+      { tag: "path", attrs: { d: "M15 3h6v6" } },
+      { tag: "path", attrs: { d: "M10 14 21 3" } },
+      {
+        tag: "path",
+        attrs: { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }
+      }
+    ]
+  };
+
+  function createIcon(name) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "viewer-icon");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "24");
+    svg.setAttribute("height", "24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var shapes = ICONS[name] || [];
+    for (var index = 0; index < shapes.length; index += 1) {
+      var shape = shapes[index];
+      var node = document.createElementNS(SVG_NS, shape.tag);
+      for (var attribute in shape.attrs) {
+        if (Object.prototype.hasOwnProperty.call(shape.attrs, attribute)) {
+          node.setAttribute(attribute, String(shape.attrs[attribute]));
+        }
+      }
+      svg.appendChild(node);
+    }
+    return svg;
+  }
+
+  function setIcon(element, name) {
+    if (!element) {
+      return;
+    }
+    element.replaceChildren(createIcon(name));
+  }
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -250,11 +335,7 @@
     position.className = "viewer-position";
     position.id = "viewer-position";
     position.setAttribute("aria-live", "polite");
-    closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "viewer-button viewer-close";
-    closeButton.setAttribute("aria-label", "Close viewer");
-    closeButton.textContent = "Close";
+    closeButton = controlButton("viewer-close", "Close viewer", "x");
     top.appendChild(position);
     top.appendChild(closeButton);
 
@@ -266,24 +347,24 @@
 
     var controls = document.createElement("div");
     controls.className = "viewer-controls";
-    prevButton = controlButton("viewer-prev", "Previous item", "Previous");
-    nextButton = controlButton("viewer-next", "Next item", "Next");
-    playButton = controlButton("viewer-play", "Play slideshow", "Play");
+    prevButton = controlButton("viewer-prev", "Previous item", "chevron-left");
+    nextButton = controlButton("viewer-next", "Next item", "chevron-right");
+    playButton = controlButton("viewer-play", "Play slideshow", "play");
     playButton.setAttribute("aria-pressed", "false");
-    zoomOutButton = controlButton("viewer-zoom-out", "Zoom out", "−");
-    zoomInButton = controlButton("viewer-zoom-in", "Zoom in", "+");
-    resetButton = controlButton("viewer-reset", "Reset zoom", "Reset");
+    zoomOutButton = controlButton("viewer-zoom-out", "Zoom out", "zoom-out");
+    zoomInButton = controlButton("viewer-zoom-in", "Zoom in", "zoom-in");
+    resetButton = controlButton("viewer-reset", "Reset zoom", "rotate-ccw");
     immersiveButton = controlButton(
       "viewer-immersive",
       "Enter immersive mode",
-      "Immersive"
+      "maximize"
     );
     immersiveButton.setAttribute("aria-pressed", "false");
     originalLink = document.createElement("a");
     originalLink.className = "viewer-original";
     originalLink.target = "_blank";
     originalLink.rel = "noopener";
-    originalLink.textContent = "Open original";
+    originalLink.appendChild(createIcon("external-link"));
     controls.appendChild(prevButton);
     controls.appendChild(nextButton);
     controls.appendChild(playButton);
@@ -391,12 +472,13 @@
     watchStage();
   }
 
-  function controlButton(className, label, text) {
+  function controlButton(className, label, iconName) {
     var button = document.createElement("button");
     button.type = "button";
     button.className = "viewer-button " + className;
     button.setAttribute("aria-label", label);
-    button.textContent = text;
+    button.setAttribute("data-label", label);
+    button.appendChild(createIcon(iconName));
     return button;
   }
 
@@ -404,14 +486,16 @@
     if (!immersiveButton) {
       return;
     }
+    var label = state.immersive
+      ? "Exit immersive mode"
+      : "Enter immersive mode";
     immersiveButton.setAttribute(
       "aria-pressed",
       state.immersive ? "true" : "false"
     );
-    immersiveButton.setAttribute(
-      "aria-label",
-      state.immersive ? "Exit immersive mode" : "Enter immersive mode"
-    );
+    immersiveButton.setAttribute("aria-label", label);
+    immersiveButton.setAttribute("data-label", label);
+    setIcon(immersiveButton, state.immersive ? "minimize" : "maximize");
   }
 
   function setImmersive(enabled) {
@@ -482,15 +566,14 @@
     if (!playButton) {
       return;
     }
+    var label = state.playing ? "Pause slideshow" : "Play slideshow";
     playButton.setAttribute(
       "aria-pressed",
       state.playing ? "true" : "false"
     );
-    playButton.textContent = state.playing ? "Pause" : "Play";
-    playButton.setAttribute(
-      "aria-label",
-      state.playing ? "Pause slideshow" : "Play slideshow"
-    );
+    playButton.setAttribute("aria-label", label);
+    playButton.setAttribute("data-label", label);
+    setIcon(playButton, state.playing ? "pause" : "play");
   }
 
   function setPositionLive(live) {
@@ -860,10 +943,9 @@
       locationLink.removeAttribute("aria-label");
     }
     originalLink.href = item.mediaUrl;
-    originalLink.setAttribute(
-      "aria-label",
-      "Open original: " + (item.name || item.path)
-    );
+    var originalLabel = "Open original: " + (item.name || item.path);
+    originalLink.setAttribute("aria-label", originalLabel);
+    originalLink.setAttribute("data-label", originalLabel);
     prevButton.disabled = state.index === 0;
     nextButton.disabled = state.index === state.items.length - 1;
     zoomInButton.disabled = item.kind === "video";

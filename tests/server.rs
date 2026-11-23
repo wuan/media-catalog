@@ -285,6 +285,9 @@ async fn renders_catalog_pages_and_hides_state() {
     assert!(css.contains(".viewer.is-immersive .viewer-top"));
     assert!(css.contains(".viewer.is-immersive .viewer-bottom"));
     assert!(css.contains(".viewer.is-chrome-hidden .viewer-bottom"));
+    assert!(css.contains(".viewer-icon"));
+    assert!(css.contains("content: attr(data-label)"));
+    assert!(css.contains(".viewer-button[data-label]:focus-visible::after"));
     assert!(css.contains("safe-area-inset"));
     assert!(css.contains("prefers-reduced-motion"));
     assert!(!css.contains("obsolete css"));
@@ -297,7 +300,12 @@ async fn renders_catalog_pages_and_hides_state() {
     let (status, headers, body) = send(app.clone(), Method::GET, "/assets/viewer.js").await;
     assert_eq!(status, StatusCode::OK);
     assert!(header_value(&headers, header::CONTENT_TYPE).starts_with("text/javascript"));
-    assert!(String::from_utf8_lossy(&body).contains("__mediaCatalogViewer"));
+    let viewer = String::from_utf8_lossy(&body);
+    assert!(viewer.contains("__mediaCatalogViewer"));
+    assert!(viewer.contains("viewer-icon"));
+    assert!(viewer.contains("createIcon"));
+    assert!(viewer.contains("\"external-link\""));
+    assert!(viewer.contains("aria-hidden"));
     let viewer_etag = header_value(&headers, header::ETAG).to_string();
 
     let (status, headers, body) = send(app.clone(), Method::HEAD, "/assets/viewer.js").await;

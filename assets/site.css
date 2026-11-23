@@ -459,9 +459,14 @@ footer {
 }
 
 .viewer-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
   min-width: 2.75rem;
   min-height: 2.75rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 0.5rem;
   background: rgba(255, 255, 255, 0.08);
@@ -481,14 +486,82 @@ footer {
   cursor: default;
 }
 
+.viewer-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* Hover and focus labels use one CSS tooltip, so no native title is needed. */
+.viewer-button[data-label]::after,
+.viewer-original[data-label]::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: 0.25rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0.35rem;
+  background: rgba(15, 15, 18, 0.98);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%);
+  transition: opacity 0.12s ease;
+}
+
+.viewer-button[data-label]:hover::after,
+.viewer-button[data-label]:focus-visible::after,
+.viewer-original[data-label]:hover::after,
+.viewer-original[data-label]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Keep edge labels inside the dialog's overflow clip. */
+.viewer-controls > .viewer-button:first-child::after {
+  left: 0;
+  transform: none;
+}
+
+.viewer-controls > :last-child::after,
+.viewer-close::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
 .viewer-original {
+  position: relative;
   margin-left: auto;
-  min-height: 2.75rem;
   display: inline-flex;
   align-items: center;
-  padding: 0.4rem 0.75rem;
+  justify-content: center;
+  width: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
   border-radius: 0.5rem;
   color: #f1d6b8;
+}
+
+.viewer-original:hover,
+.viewer-original:focus-visible {
+  background: rgba(214, 162, 115, 0.18);
 }
 
 .viewer-caption {
