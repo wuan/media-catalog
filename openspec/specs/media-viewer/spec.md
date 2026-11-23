@@ -128,7 +128,7 @@ The viewer SHALL provide an immersive mode that fills the window, lays the stage
 
 ### Requirement: Present images with pan and zoom
 
-The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL defer requesting the original until the item has been shown for a short delay, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents.
+The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL defer requesting the original until the item has been shown for a short delay, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents. The viewer SHALL keep the placeholder aligned with the current stage whenever the stage layout changes while the preview is visible.
 
 #### Scenario: Original image
 - **WHEN** an image item opens
@@ -161,6 +161,18 @@ The viewer SHALL display images at their original resolution with an immediate t
 #### Scenario: Thumbnail without known dimensions
 - **WHEN** an image item without known width or height opens and its thumbnail is shown
 - **THEN** the thumbnail is fitted using its own dimensions as before
+
+#### Scenario: Placeholder tracks the final chrome layout
+- **WHEN** an image item opens and filling the caption and metadata chrome changes the stage size before the thumbnail preview finishes loading
+- **THEN** the placeholder is sized from the resulting stage, so its square side equals the shorter edge of the fitted box for the stage that is actually visible
+
+#### Scenario: Placeholder follows immersive mode
+- **WHEN** the visitor enters or leaves immersive mode while a thumbnail preview is visible
+- **THEN** the placeholder is resized from the new full-area or framed stage before the original replaces it
+
+#### Scenario: Placeholder follows a viewport resize
+- **WHEN** the browser viewport changes size while a thumbnail preview is visible
+- **THEN** the placeholder is resized from the new stage so it remains centered and equal to the shorter edge of the fitted box
 
 #### Scenario: Zoom reset
 - **WHEN** the viewer moves to a different item
