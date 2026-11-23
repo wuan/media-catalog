@@ -122,11 +122,14 @@
       path;
     var width = Number(element.getAttribute("data-width"));
     var height = Number(element.getAttribute("data-height"));
+    var sizeText = element.getAttribute("data-size");
+    var size = /^\d+$/.test(sizeText || "") ? Number(sizeText) : null;
     return {
       path: path,
       kind: element.getAttribute("data-kind") || "image",
       captured: element.getAttribute("data-captured") || "",
       model: modelNode ? modelNode.textContent.trim() : "",
+      size: size,
       thumbUrl: element.getAttribute("data-thumb-url") || "",
       width: width > 0 ? width : null,
       height: height > 0 ? height : null,
@@ -417,8 +420,37 @@
     updateUrl(state.items[index].path);
   }
 
+  var FILE_SIZE_UNITS = ["kB", "MB", "GB"];
+
+  // Decimal units: whole B and kB, one decimal for MB and GB. A value that
+  // would round to 1000 of a unit moves up to the next unit.
+  function formatFileSize(bytes) {
+    if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) {
+      return "";
+    }
+    if (bytes < 1000) {
+      return Math.round(bytes) + " B";
+    }
+    var value = bytes / 1000;
+    var unit = 0;
+    while (
+      unit < FILE_SIZE_UNITS.length - 1 &&
+      Number(fileSizeNumber(value, unit)) >= 1000
+    ) {
+      value = value / 1000;
+      unit += 1;
+    }
+    return fileSizeNumber(value, unit) + " " + FILE_SIZE_UNITS[unit];
+  }
+
+  function fileSizeNumber(value, unit) {
+    return unit === 0 ? String(Math.round(value)) : value.toFixed(1);
+  }
+
   function captionText(item) {
-    return item.model ? item.captured + " · " + item.model : item.captured;
+    return [item.captured, item.model, formatFileSize(item.size)]
+      .filter(Boolean)
+      .join(" · ");
   }
 
   function showItem() {
@@ -1061,6 +1093,7 @@
     isSwipe: isSwipe,
     tileFromElement: tileFromElement,
     captionText: captionText,
+    formatFileSize: formatFileSize,
     fittedBox: fittedBox,
     placeholderBox: placeholderBox
   };

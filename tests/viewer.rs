@@ -64,6 +64,23 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["tileCaption"], "2024-05-01 10:00:00 · iPhone 15 Pro");
     assert_eq!(result["bareTileModel"], "");
     assert_eq!(result["bareTileCaption"], "2024-05-01 10:00:00");
+    assert_eq!(result["sizedTileSize"], 3_400_000.0);
+    assert_eq!(
+        result["sizedTileCaption"],
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 3.4 MB"
+    );
+    assert_eq!(result["sizedBareTileCaption"], "2024-05-01 10:00:00 · 532 kB");
+    assert_eq!(result["badSizeTileSize"], Value::Null);
+    assert_eq!(
+        result["badSizeTileCaption"],
+        "2024-05-01 10:00:00 · iPhone 15 Pro"
+    );
+    assert_eq!(result["sizeBytes"], "845 B");
+    assert_eq!(result["sizeKilobytes"], "532 kB");
+    assert_eq!(result["sizeRoundsUpToMegabytes"], "1.0 MB");
+    assert_eq!(result["sizeMegabytes"], "3.4 MB");
+    assert_eq!(result["sizeGigabytes"], "1.2 GB");
+    assert_eq!(result["sizeUnknown"], "");
     assert_eq!(result["tileAlt"], "a.jpg");
     assert_eq!(result["tileWidth"], 4000.0);
     assert_eq!(result["tileHeight"], 3000.0);

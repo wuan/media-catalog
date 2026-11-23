@@ -522,6 +522,7 @@ mod tests {
             captured_at: Some(captured_at.to_string()),
             model: None,
             mtime_ns: 0,
+            size: 0,
             width: Some(10),
             height: Some(10),
             duration_ms: None,
@@ -969,6 +970,7 @@ mod tests {
             captured_at: None,
             model: None,
             mtime_ns: 1_714_610_000_000_000_000, // 2024-05-01 ~ in local time
+            size: 0,
             ..item("2024/05/fallback.jpg", 2024, 5, "2024-05-01 00:00:00")
         }]);
         let captured = catalog.month(2024, 5).unwrap().items[0].captured_at.clone();

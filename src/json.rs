@@ -140,6 +140,10 @@ pub struct ShardItem {
     pub captured_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Original file size in bytes. Absent in shards published before sizes
+    /// were recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
@@ -159,6 +163,7 @@ impl From<&ItemView> for ShardItem {
             kind: item.kind,
             captured_at: item.captured_at.clone(),
             model: item.model.clone(),
+            size_bytes: item.size,
             width: item.width,
             height: item.height,
             duration_ms: item.duration_ms,
@@ -180,6 +185,7 @@ impl ShardItem {
             kind: self.kind,
             captured_at: self.captured_at.clone(),
             model: self.model.clone(),
+            size: self.size_bytes,
             width: self.width,
             height: self.height,
             duration_ms: self.duration_ms,
@@ -496,6 +502,7 @@ mod tests {
                     captured_at: Some("2023-12-01 10:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 3_400_000,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,
@@ -510,6 +517,7 @@ mod tests {
                     captured_at: Some("2024-05-02 11:00:00".into()),
                     model: Some("iPhone 15 Pro".into()),
                     mtime_ns: 0,
+                    size: 48_000_000,
                     width: Some(1920),
                     height: Some(1080),
                     duration_ms: Some(12_500),
@@ -524,6 +532,7 @@ mod tests {
                     captured_at: Some("2024-05-03 12:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 532_000,
                     width: None,
                     height: None,
                     duration_ms: None,
@@ -547,6 +556,48 @@ mod tests {
         assert!(output.shards[&2024].contains("\"duration_ms\": 12500"));
         assert!(output.shards[&2024].contains("\"model\": \"iPhone 15 Pro\""));
         assert!(output.shards[&2024].contains("\"thumb_available\": false"));
+    }
+
+    #[test]
+    fn shards_publish_file_sizes_in_bytes() {
+        let output = render_json(&catalog()).unwrap();
+        assert!(output.shards[&2023].contains("\"size_bytes\": 3400000"));
+        assert!(output.shards[&2024].contains("\"size_bytes\": 48000000"));
+
+        let parsed = catalog_from_json(&output.index, &output.shards).unwrap();
+        let clip = parsed
+            .years
+            .iter()
+            .flat_map(|year| &year.months)
+            .flat_map(|month| &month.items)
+            .find(|item| item.path == "2024/05/clip.mp4")
+            .unwrap();
+        assert_eq!(clip.size, Some(48_000_000));
+    }
+
+    #[test]
+    fn shard_items_without_size_bytes_load_with_unknown_size() {
+        let output = render_json(&catalog()).unwrap();
+        let shards = output
+            .shards
+            .iter()
+            .map(|(year, text)| {
+                let stripped = text
+                    .lines()
+                    .filter(|line| !line.contains("\"size_bytes\""))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (*year, stripped)
+            })
+            .collect();
+        let parsed = catalog_from_json(&output.index, &shards).unwrap();
+        for year in &parsed.years {
+            for month in &year.months {
+                for item in &month.items {
+                    assert_eq!(item.size, None, "{}", item.path);
+                }
+            }
+        }
     }
 
     #[test]
@@ -588,6 +639,7 @@ mod tests {
                     captured_at: Some("2024-05-30 10:11:12".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 0,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,
@@ -602,6 +654,7 @@ mod tests {
                     captured_at: Some("2024-06-02 09:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 0,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,
@@ -616,6 +669,7 @@ mod tests {
                     captured_at: Some("2024-06-20 09:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 0,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,
@@ -688,6 +742,7 @@ mod tests {
                     captured_at: Some("2024-05-02 10:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 0,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,
@@ -702,6 +757,7 @@ mod tests {
                     captured_at: Some("2024-05-10 10:00:00".into()),
                     model: None,
                     mtime_ns: 0,
+                    size: 0,
                     width: Some(4000),
                     height: Some(3000),
                     duration_ms: None,

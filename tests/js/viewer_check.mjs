@@ -37,6 +37,17 @@ const bareTile = api.tileFromElement({
     return null;
   }
 });
+function withSize(base, size) {
+  return {
+    getAttribute(name) {
+      return name === "data-size" ? size : base.getAttribute(name);
+    },
+    querySelector: base.querySelector
+  };
+}
+const sizedTile = api.tileFromElement(withSize(fakeTile, "3400000"));
+const sizedBareTile = api.tileFromElement(withSize(bareTile.element, "532000"));
+const badSizeTile = api.tileFromElement(withSize(fakeTile, "12abc"));
 
 const result = {
   item: api.parseItemParam("?q=alpha&item=2024/05/a.jpg"),
@@ -67,6 +78,17 @@ const result = {
   tileCaption: api.captionText(tile),
   bareTileModel: bareTile.model,
   bareTileCaption: api.captionText(bareTile),
+  sizedTileSize: sizedTile.size,
+  sizedTileCaption: api.captionText(sizedTile),
+  sizedBareTileCaption: api.captionText(sizedBareTile),
+  badSizeTileSize: badSizeTile.size,
+  badSizeTileCaption: api.captionText(badSizeTile),
+  sizeBytes: api.formatFileSize(845),
+  sizeKilobytes: api.formatFileSize(532000),
+  sizeRoundsUpToMegabytes: api.formatFileSize(999950),
+  sizeMegabytes: api.formatFileSize(3400000),
+  sizeGigabytes: api.formatFileSize(1240000000),
+  sizeUnknown: api.formatFileSize(null),
   tileAlt: tile.alt,
   tileWidth: tile.width,
   tileHeight: tile.height,

@@ -57,6 +57,7 @@ expression: html
       data-item-path="2024/05/lisbon.jpg"
       data-kind="image"
       data-captured="2024-05-02 10:00:00"
+      data-size="0"
       data-thumb-url="/thumbs/2024/05/lisbon.jpg.webp?v=10-20"
       data-width="4000"
       data-height="3000">
@@ -86,6 +87,7 @@ expression: html
       data-item-path="2024/05/algarve.jpg"
       data-kind="image"
       data-captured="2024-05-10 10:00:00"
+      data-size="0"
       data-thumb-url="/thumbs/2024/05/algarve.jpg.webp?v=10-20"
       data-width="4000"
       data-height="3000">

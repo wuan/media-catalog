@@ -98,6 +98,9 @@
     link.dataset.itemPath = item.path;
     link.dataset.kind = item.kind;
     link.dataset.captured = item.captured_at || "";
+    if (typeof item.size_bytes === "number") {
+      link.dataset.size = String(item.size_bytes);
+    }
     if (item.thumb_url) {
       link.dataset.thumbUrl = item.thumb_url;
     }

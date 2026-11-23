@@ -17,6 +17,8 @@ pub struct CatalogItemInput {
     pub captured_at: Option<String>,
     pub model: Option<String>,
     pub mtime_ns: i64,
+    /// Size of the original file in bytes, as seen by the scan.
+    pub size: u64,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
@@ -37,6 +39,9 @@ pub struct ItemView {
     pub kind: MediaKind,
     pub captured_at: String,
     pub model: Option<String>,
+    /// Size of the original file in bytes. Unknown for items loaded from
+    /// shards published before sizes were recorded.
+    pub size: Option<u64>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
@@ -190,6 +195,7 @@ pub fn build_catalog(
                 .trim()
                 .to_string(),
             model: item.model,
+            size: Some(item.size),
             path: item.rel_path,
             year: item.year,
             month: item.month,
@@ -256,6 +262,7 @@ mod tests {
             captured_at: Some(captured_at.to_string()),
             model: None,
             mtime_ns: 0,
+            size: 0,
             width: Some(10),
             height: Some(10),
             duration_ms: None,

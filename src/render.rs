@@ -106,6 +106,7 @@ struct TileView {
     captured_label: String,
     caption_time: String,
     model: String,
+    size: Option<u64>,
     width: Option<u32>,
     height: Option<u32>,
 }
@@ -275,6 +276,7 @@ fn tile_from_item(item: &ItemView) -> TileView {
         captured_label: item.captured_at.clone(),
         caption_time: short_capture_label(&item.captured_at),
         model: item.model.clone().unwrap_or_default(),
+        size: item.size,
         width: item.width,
         height: item.height,
     }
@@ -314,6 +316,7 @@ mod tests {
             captured_at: Some(captured_at.to_string()),
             model: None,
             mtime_ns: 0,
+            size: 0,
             width: Some(4000),
             height: Some(3000),
             duration_ms: None,
@@ -411,6 +414,36 @@ mod tests {
         assert!(html.contains("data-captured=\"2024-05-01 10:00:00\""));
         assert!(html.contains("alt=\"a.jpg\""));
         assert!(!html.contains("<span class=\"name\">"));
+    }
+
+    #[test]
+    fn tiles_carry_the_file_size_only_when_known() {
+        let mut catalog = build_catalog(
+            vec![
+                CatalogItemInput {
+                    size: 3_400_000,
+                    ..item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")
+                },
+                item("2024/05/b.jpg", 2024, 5, "2024-05-02 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        // Items loaded from shards published before sizes were recorded have
+        // no size; build_catalog always knows it, so clear it by hand.
+        for year in &mut catalog.years {
+            for month in &mut year.months {
+                for item in &mut month.items {
+                    if item.path == "2024/05/b.jpg" {
+                        item.size = None;
+                    }
+                }
+            }
+        }
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert!(html.contains("data-size=\"3400000\""));
+        assert_eq!(html.matches("data-size=").count(), 1);
+        assert!(!html.contains("3.4 MB"), "tile captions do not show the size");
     }
 
     #[test]

@@ -33,7 +33,7 @@ The generator SHALL classify each discovered file as an image or a video based o
 - **THEN** it is skipped, reported in the run summary, and does not abort the build
 
 ### Requirement: Extract safe capture metadata
-The generator SHALL extract width, height, capture timestamp when available, video duration, and camera model when available; it SHALL fall back to the file modification time when no capture timestamp exists and SHALL NOT expose GPS, location, serial numbers, or other camera details in generated output.
+The generator SHALL extract width, height, capture timestamp when available, video duration, and camera model when available; it SHALL fall back to the file modification time when no capture timestamp exists and SHALL NOT expose GPS, location, serial numbers, or other camera details in generated output. The generator SHALL also publish each file's size in bytes as recorded by the scan.
 
 #### Scenario: Photo with EXIF timestamp
 - **WHEN** a JPEG contains an EXIF capture timestamp
@@ -57,7 +57,7 @@ The generator SHALL extract width, height, capture timestamp when available, vid
 
 #### Scenario: Privacy of metadata
 - **WHEN** a source photo contains GPS coordinates, a serial number, and camera details
-- **THEN** GPS, location, serial numbers, and other camera details do not appear in generated HTML or JSON, while the camera model may appear in tile captions and item records
+- **THEN** GPS, location, serial numbers, and other camera details do not appear in generated HTML or JSON, while the camera model may appear in tile captions and item records and the file size may appear in item records and the viewer caption
 
 ### Requirement: Order catalog items deterministically
 The generator SHALL present years, months, and items in reverse chronological order, ordering items within a month by capture timestamp and then by relative path so repeated runs produce the same order.

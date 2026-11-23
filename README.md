@@ -190,6 +190,7 @@ For each item the catalog records only:
 - capture timestamp (`YYYY-MM-DD HH:MM:SS`, naive local wall clock)
 - video duration in milliseconds
 - camera model when the source provides one
+- original file size in bytes, as seen by the scan
 - media kind, relative path, thumbnail availability
 
 JPEG capture time comes from EXIF `DateTimeOriginal`; when it is absent, the
@@ -200,8 +201,9 @@ The camera model comes from JPEG EXIF `Model` or common ffprobe model tags.
 
 GPS coordinates, location data, serial numbers, and other private EXIF fields
 are never extracted or serialized into JSON or rendered pages. The camera model
-is published because it appears in tile captions. Thumbnails are re-encoded from
-pixels and therefore carry no source metadata.
+is published because it appears in tile captions, and the file size because the
+viewer caption shows it. Thumbnails are re-encoded from pixels and therefore
+carry no source metadata.
 
 ## Events
 
@@ -454,6 +456,7 @@ Each `catalog/YYYY.json` shard contains ordered item records:
       "kind": "image",
       "captured_at": "2024-05-01 10:11:12",
       "model": "iPhone 15 Pro",
+      "size_bytes": 3400000,
       "width": 4032,
       "height": 3024,
       "duration_ms": null,
@@ -471,9 +474,10 @@ when no events are configured, and an event's `sections` array is omitted when i
 has no sections. Older catalogs without the fields load as having no events or
 sections. Item event slugs are sorted independently of the order events appear
 in the events file. The camera model is also optional per item and omitted when
-unknown. Sections publish
-resolved `start`/`end` ranges rather than bookmark timestamps, so the server does
-not depend on the generator's bookmark derivation rule.
+unknown. `size_bytes` is always written by current builds; catalogs published
+before it existed still load, and their items show no size in the viewer.
+Sections publish resolved `start`/`end` ranges rather than bookmark timestamps,
+so the server does not depend on the generator's bookmark derivation rule.
 
 Search (`search.html` + `assets/search.js`, both embedded in the server binary)
 loads the index and all year shards in parallel, then filters by text, type
@@ -495,6 +499,10 @@ link behavior.
   month page covers that month, a sectioned event page covers every authored
   section and the Other bucket, and a search page covers the current filtered
   results. Navigation stops at the first and last item.
+- **Caption:** one line with the capture timestamp, the camera model when known,
+  and the original's file size in decimal units, for example
+  `2024-05-01 10:11:12 · iPhone 15 Pro · 3.4 MB`. The filename is not shown;
+  items from catalogs published before file sizes were recorded show no size.
 - **Navigation:** use the Previous/Next controls, the Left/Right arrow keys, or a
   horizontal swipe while an image is at fit scale. Arrow keys keep navigating
   while an image is zoomed.

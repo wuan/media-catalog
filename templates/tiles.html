@@ -5,6 +5,7 @@
       data-item-path="{{ item.rel_path }}"
       data-kind="{{ item.kind }}"
       data-captured="{{ item.captured_label }}"
+      {% if let Some(size) = item.size %}data-size="{{ size }}"{% endif %}
       {% if item.thumb_available %}data-thumb-url="{{ item.thumb_url }}"{% endif %}
       {% if let Some(width) = item.width %}data-width="{{ width }}"{% endif %}
       {% if let Some(height) = item.height %}data-height="{{ height }}"{% endif %}>

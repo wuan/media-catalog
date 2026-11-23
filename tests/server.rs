@@ -109,6 +109,7 @@ fn item(path: &str, kind: MediaKind) -> CatalogItemInput {
         captured_at: Some("2024-05-01 10:00:00".to_string()),
         model: None,
         mtime_ns: 0,
+        size: 0,
         width: Some(4000),
         height: Some(3000),
         duration_ms: None,
