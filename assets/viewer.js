@@ -9,7 +9,7 @@
   var RESULTS_EVENT = "media-catalog:results-rendered";
   // Wait this long on an item before fetching its original, so holding an
   // arrow key to browse only loads thumbnails for the items passed over.
-  var ORIGINAL_DELAY_MS = 300;
+  var ORIGINAL_DELAY_MS = 200;
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
