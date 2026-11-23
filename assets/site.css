@@ -68,6 +68,40 @@ h1 {
   font-size: 0.95rem;
 }
 
+.month-nav {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  font-size: 0.95rem;
+}
+
+.month-nav a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.month-nav a:hover {
+  text-decoration: underline;
+}
+
+.month-nav-next {
+  margin-left: auto;
+}
+
+.back-to-top {
+  display: inline-block;
+  margin-top: 0.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.back-to-top:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .total,
 .count,
 .status {

@@ -6,7 +6,7 @@
   <title>{{ title }} · Media catalog</title>
   <link rel="stylesheet" href="/assets/site.css">
 </head>
-<body>
+<body id="top">
   <header class="site-header">
     <a class="brand" href="/">Media catalog</a>
     <nav><a href="/search.html">Search</a></nav>
@@ -34,6 +34,7 @@
       </h2>
       {% let items = month.items %}
       {% include "tiles.html" %}
+      <a class="back-to-top" href="#top">Back to top</a>
     </section>
     {% endfor %}{% else %}
     {% if !section_nav.is_empty() %}
@@ -53,6 +54,7 @@
       </h2>
       {% let items = other_items %}
       {% include "tiles.html" %}
+      <a class="back-to-top" href="#top">Back to top</a>
     </section>
     {% endif %}
     {% for section in sections %}
@@ -67,6 +69,7 @@
       {% endif %}
       {% let items = section.items %}
       {% include "tiles.html" %}
+      <a class="back-to-top" href="#top">Back to top</a>
     </section>
     {% endfor %}
     {% endif %}

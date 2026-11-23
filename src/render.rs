@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use askama::Template;
 use chrono::NaiveDateTime;
 
-use crate::model::{Catalog, EventView, ItemView};
+use crate::model::{Catalog, EventView, ItemView, MonthView};
 use crate::paths::{event_page_url, month_page_url, year_page_url};
 use crate::scan::MediaKind;
 
@@ -92,6 +92,14 @@ struct MonthTemplate {
     year_url: String,
     item_count: usize,
     items: Vec<TileView>,
+    prev_month: Option<MonthNavLink>,
+    next_month: Option<MonthNavLink>,
+}
+
+/// A neighbouring month page link used by the month navigation fragment.
+struct MonthNavLink {
+    label: String,
+    url: String,
 }
 
 struct TileView {
@@ -241,16 +249,49 @@ pub fn render_month(catalog: &Catalog, year: i32, month: u32) -> Result<Option<S
     let Some(view) = catalog.month(year, month) else {
         return Ok(None);
     };
+    let (prev_month, next_month) = month_neighbours(catalog, view.year, view.month);
     let html = MonthTemplate {
         year: view.year,
         month_label: view.label.clone(),
         year_url: year_page_url(view.year),
         item_count: view.items.len(),
         items: view.items.iter().map(tile_from_item).collect(),
+        prev_month,
+        next_month,
     }
     .render()
     .with_context(|| format!("rendering {}-{:02}", view.year, view.month))?;
     Ok(Some(html))
+}
+
+/// Find the nearest earlier and later month pages in chronological order.
+///
+/// Month pages are sparse, so adjacency skips missing months and crosses year
+/// boundaries. A direction is `None` when no page exists on that side.
+fn month_neighbours(
+    catalog: &Catalog,
+    year: i32,
+    month: u32,
+) -> (Option<MonthNavLink>, Option<MonthNavLink>) {
+    let mut pages: Vec<&MonthView> = catalog
+        .years
+        .iter()
+        .flat_map(|year| year.months.iter())
+        .collect();
+    pages.sort_by_key(|view| (view.year, view.month));
+    let Some(index) = pages
+        .iter()
+        .position(|view| view.year == year && view.month == month)
+    else {
+        return (None, None);
+    };
+    let nav_link = |view: &MonthView| MonthNavLink {
+        label: view.label.clone(),
+        url: month_page_url(view.year, view.month),
+    };
+    let prev = index.checked_sub(1).map(|earlier| nav_link(pages[earlier]));
+    let next = pages.get(index + 1).map(|later| nav_link(later));
+    (prev, next)
 }
 
 /// Render the embedded search and filter shell.
@@ -391,6 +432,146 @@ mod tests {
         );
         assert_eq!(html.matches("href=\"/media/").count(), 500);
         assert_eq!(html.matches("loading=\"lazy\"").count(), 500);
+    }
+
+    #[test]
+    fn month_navigation_links_adjacent_pages_in_the_same_year() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/04/a.jpg", 2024, 4, "2024-04-01 10:00:00"),
+                item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/06/a.jpg", 2024, 6, "2024-06-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert!(
+            html.contains("<a class=\"month-nav-prev\" href=\"/2024/04/\" rel=\"prev\">"),
+            "expected previous link to April 2024, got:\n{html}"
+        );
+        assert!(html.contains("April 2024"));
+        assert!(
+            html.contains("<a class=\"month-nav-next\" href=\"/2024/06/\" rel=\"next\">"),
+            "expected next link to June 2024, got:\n{html}"
+        );
+        assert!(html.contains("June 2024"));
+    }
+
+    #[test]
+    fn month_navigation_skips_months_without_pages() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/03/a.jpg", 2024, 3, "2024-03-01 10:00:00"),
+                item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/07/a.jpg", 2024, 7, "2024-07-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert!(html.contains("href=\"/2024/03/\""));
+        assert!(html.contains("March 2024"));
+        assert!(html.contains("href=\"/2024/07/\""));
+        assert!(html.contains("July 2024"));
+        assert!(!html.contains("/2024/04/"));
+        assert!(!html.contains("/2024/06/"));
+    }
+
+    #[test]
+    fn month_navigation_crosses_year_boundaries() {
+        let catalog = build_catalog(
+            vec![
+                item("2023/12/a.jpg", 2023, 12, "2023-12-01 10:00:00"),
+                item("2024/01/b.jpg", 2024, 1, "2024-01-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let january = render_month(&catalog, 2024, 1).unwrap().unwrap();
+        assert!(january.contains("<a class=\"month-nav-prev\" href=\"/2023/12/\" rel=\"prev\">"));
+        assert!(january.contains("December 2023"));
+        assert_eq!(january.matches("rel=\"next\"").count(), 0);
+
+        let december = render_month(&catalog, 2023, 12).unwrap().unwrap();
+        assert!(december.contains("<a class=\"month-nav-next\" href=\"/2024/01/\" rel=\"next\">"));
+        assert!(december.contains("January 2024"));
+        assert_eq!(december.matches("rel=\"prev\"").count(), 0);
+    }
+
+    #[test]
+    fn month_navigation_omits_the_earliest_and_latest_edges() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/03/a.jpg", 2024, 3, "2024-03-01 10:00:00"),
+                item("2024/05/b.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/07/c.jpg", 2024, 7, "2024-07-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let earliest = render_month(&catalog, 2024, 3).unwrap().unwrap();
+        assert_eq!(earliest.matches("rel=\"prev\"").count(), 0);
+        assert_eq!(earliest.matches("rel=\"next\"").count(), 2);
+
+        let latest = render_month(&catalog, 2024, 7).unwrap().unwrap();
+        assert_eq!(latest.matches("rel=\"prev\"").count(), 2);
+        assert_eq!(latest.matches("rel=\"next\"").count(), 0);
+    }
+
+    #[test]
+    fn single_month_page_has_no_neighbour_links() {
+        let catalog = build_catalog(
+            vec![item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert_eq!(html.matches("rel=\"prev\"").count(), 0);
+        assert_eq!(html.matches("rel=\"next\"").count(), 0);
+    }
+
+    #[test]
+    fn month_navigation_is_repeated_above_and_below_the_grid() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/04/a.jpg", 2024, 4, "2024-04-01 10:00:00"),
+                item("2024/05/b.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/06/c.jpg", 2024, 6, "2024-06-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        assert_eq!(html.matches("class=\"month-nav\"").count(), 2);
+        assert_eq!(html.matches("rel=\"prev\"").count(), 2);
+        assert_eq!(html.matches("rel=\"next\"").count(), 2);
+        assert_eq!(html.matches("href=\"/2024/04/\"").count(), 2);
+        assert_eq!(html.matches("href=\"/2024/06/\"").count(), 2);
+
+        let first = html.find("class=\"month-nav\"").unwrap();
+        let heading = html.find("<h1>").unwrap();
+        let last = html.rfind("class=\"month-nav\"").unwrap();
+        let grid_end = html.find("</div>").unwrap();
+        assert!(first < heading, "top navigation must precede the heading");
+        assert!(grid_end < last, "bottom navigation must follow the grid");
+    }
+
+    #[test]
+    fn snapshot_multi_year_month_navigation() {
+        let catalog = build_catalog(
+            vec![
+                item("2023/11/a.jpg", 2023, 11, "2023-11-01 10:00:00"),
+                item("2023/12/b.jpg", 2023, 12, "2023-12-01 10:00:00"),
+                item("2024/02/c.jpg", 2024, 2, "2024-02-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        insta::assert_snapshot!(
+            "month_2023_12_navigation",
+            render_month(&catalog, 2023, 12).unwrap().unwrap()
+        );
     }
 
     #[test]
@@ -885,6 +1066,89 @@ mod tests {
         );
         let html = render_event(&catalog, "empty").unwrap().unwrap();
         assert!(html.contains("<h1>Empty trip</h1>"));
+        assert!(html.contains("No items fall within this event."));
+    }
+
+    #[test]
+    fn month_grouped_event_links_back_to_top_after_each_grid() {
+        let html = render_event(&cross_month_catalog(), "may-trip")
+            .unwrap()
+            .unwrap();
+        assert!(html.contains("<body id=\"top\">"));
+        assert_eq!(
+            html.matches("class=\"back-to-top\" href=\"#top\"").count(),
+            2
+        );
+        assert!(!html.contains("<script>"));
+
+        let may_item = html.find("href=\"/media/2024/05/a.jpg\"").unwrap();
+        let june_heading = html.find("June 2024").unwrap();
+        let first_link = html.find("class=\"back-to-top\"").unwrap();
+        assert!(may_item < first_link && first_link < june_heading);
+
+        let june_item = html.find("href=\"/media/2024/06/b.jpg\"").unwrap();
+        let second_link = html.rfind("class=\"back-to-top\"").unwrap();
+        let main_end = html.find("</main>").unwrap();
+        assert!(june_item < second_link && second_link < main_end);
+    }
+
+    #[test]
+    fn authored_sections_and_other_bucket_link_back_to_top() {
+        let catalog = event_catalog(
+            vec![
+                item("2024/05/before.jpg", 2024, 5, "2024-05-01 00:00:00"),
+                item("2024/05/inside.jpg", 2024, 5, "2024-05-10 10:00:00"),
+                item("2024/05/gap.jpg", 2024, 5, "2024-05-20 10:00:00"),
+            ],
+            vec![EventMeta {
+                slug: "portugal".into(),
+                title: "Portugal".into(),
+                start: "2024-05-01 00:00".into(),
+                end: "2024-05-31 23:59".into(),
+                description: None,
+                item_count: 0,
+                sections: vec![section(
+                    "lisbon",
+                    "Lisbon",
+                    "2024-05-05 00:00",
+                    "2024-05-15 23:59",
+                )],
+            }],
+        );
+        let html = render_event(&catalog, "portugal").unwrap().unwrap();
+        assert_eq!(
+            html.matches("class=\"back-to-top\" href=\"#top\"").count(),
+            2
+        );
+        assert_eq!(html.matches("class=\"section-nav\"").count(), 1);
+        assert!(html.contains("href=\"#lisbon\""));
+        assert!(html.contains("href=\"#other\""));
+
+        let other = html.find("id=\"other\"").unwrap();
+        let other_item = html.find("href=\"/media/2024/05/gap.jpg\"").unwrap();
+        let lisbon = html.find("id=\"lisbon\"").unwrap();
+        let lisbon_item = html.find("href=\"/media/2024/05/inside.jpg\"").unwrap();
+        let first_link = html.find("class=\"back-to-top\"").unwrap();
+        let second_link = html.rfind("class=\"back-to-top\"").unwrap();
+        assert!(other < other_item && other_item < first_link);
+        assert!(first_link < lisbon);
+        assert!(lisbon < lisbon_item && lisbon_item < second_link);
+    }
+
+    #[test]
+    fn empty_event_has_a_top_anchor_but_no_back_to_top_links() {
+        let catalog = event_catalog(
+            vec![item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")],
+            vec![event_meta(
+                "empty",
+                "Empty trip",
+                "2024-06-01 00:00",
+                "2024-06-30 23:59",
+            )],
+        );
+        let html = render_event(&catalog, "empty").unwrap().unwrap();
+        assert!(html.contains("<body id=\"top\">"));
+        assert_eq!(html.matches("href=\"#top\"").count(), 0);
         assert!(html.contains("No items fall within this event."));
     }
 

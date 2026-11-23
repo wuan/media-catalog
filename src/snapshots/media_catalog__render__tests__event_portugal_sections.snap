@@ -10,7 +10,7 @@ expression: html
   <title>Portugal · Media catalog</title>
   <link rel="stylesheet" href="/assets/site.css">
 </head>
-<body>
+<body id="top">
   <header class="site-header">
     <a class="brand" href="/">Media catalog</a>
     <nav><a href="/search.html">Search</a></nav>
@@ -70,6 +70,7 @@ expression: html
   </figure>
   
 </div>
+      <a class="back-to-top" href="#top">Back to top</a>
     </section>
     
     <section class="event-section" id="algarve">
@@ -100,6 +101,7 @@ expression: html
   </figure>
   
 </div>
+      <a class="back-to-top" href="#top">Back to top</a>
     </section>
     
     

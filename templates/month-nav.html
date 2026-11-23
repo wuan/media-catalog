@@ -1,0 +1,4 @@
+<nav class="month-nav" aria-label="Month navigation">
+  {% if let Some(prev) = prev_month %}<a class="month-nav-prev" href="{{ prev.url }}" rel="prev"><span aria-hidden="true">←</span> {{ prev.label }}</a>{% endif %}
+  {% if let Some(next) = next_month %}<a class="month-nav-next" href="{{ next.url }}" rel="next">{{ next.label }} <span aria-hidden="true">→</span></a>{% endif %}
+</nav>
