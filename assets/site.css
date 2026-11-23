@@ -288,8 +288,7 @@ footer {
 }
 
 .viewer.is-chrome-hidden .viewer-top,
-.viewer.is-chrome-hidden .viewer-controls,
-.viewer.is-chrome-hidden .viewer-caption {
+.viewer.is-chrome-hidden .viewer-bottom {
   opacity: 0;
   pointer-events: none;
 }
@@ -299,6 +298,54 @@ footer {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+.viewer-bottom {
+  display: block;
+}
+
+/* Immersive mode: the stage fills the frame and chrome overlays it. */
+.viewer.is-immersive .viewer-frame {
+  position: relative;
+}
+
+.viewer.is-immersive .viewer-stage {
+  flex: 1 1 auto;
+}
+
+.viewer.is-immersive .viewer-top,
+.viewer.is-immersive .viewer-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+}
+
+.viewer.is-immersive .viewer-top {
+  top: 0;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  border-bottom: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.75),
+    rgba(0, 0, 0, 0)
+  );
+}
+
+.viewer.is-immersive .viewer-bottom {
+  bottom: 0;
+  padding-bottom: max(0.7rem, env(safe-area-inset-bottom));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
+  transition: opacity 0.2s ease;
+}
+
+.viewer.is-immersive .viewer-controls,
+.viewer.is-immersive .viewer-caption {
+  border-top: none;
 }
 
 .viewer-top {

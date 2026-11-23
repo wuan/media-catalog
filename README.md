@@ -510,9 +510,12 @@ link behavior.
   horizontal swipe while an image is at fit scale. Arrow keys keep navigating
   while an image is zoomed.
 - **Immersive mode:** use the Immersive control or press `f` to fill the window.
-  The top, control, and caption chrome hides after a short idle and returns on
-  pointer movement, a tap, the wheel, a key press, or keyboard focus. Escape
-  leaves immersive mode first and closes the viewer on the next press.
+  The stage spans the whole window, so images and videos are fitted to the
+  maximum available area. The top, control, and caption chrome sits above the
+  stage with a translucent gradient backing and hides after a short idle; it
+  returns on pointer movement, a tap, the wheel, a key press, or keyboard focus
+  without resizing the stage. Escape leaves immersive mode first and closes the
+  viewer on the next press.
 - **Slideshow:** press Play or `s` to advance through the album every 5 seconds.
   Playback never starts on its own, stops on the last item, and restarts from the
   first item when Play is pressed on the last item. Manual navigation, zoom,
@@ -556,8 +559,9 @@ Browser verification checklist for the video and focus paths:
   last items disable the matching direction.
 - Play a video, navigate away, and confirm audio stops; reopen and confirm it
   starts paused.
-- Toggle immersive mode with the control and with `f`; wait for the chrome to
-  hide, then move the pointer or press Tab and confirm it returns.
+- Toggle immersive mode with the control and with `f`; confirm the media fills
+  the window and the chrome overlays it, then wait for the chrome to hide and
+  confirm the pointer or Tab reveals it without resizing the stage.
 - Press Escape in immersive mode and confirm the viewer stays open; press Escape
   again and confirm it closes.
 - Start the slideshow with Play and `s`; confirm it advances every 5 seconds,

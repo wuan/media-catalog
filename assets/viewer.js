@@ -289,10 +289,14 @@
     caption.appendChild(captured);
     caption.appendChild(error);
 
+    var bottom = document.createElement("div");
+    bottom.className = "viewer-bottom";
+    bottom.appendChild(controls);
+    bottom.appendChild(caption);
+
     frame.appendChild(top);
     frame.appendChild(stage);
-    frame.appendChild(controls);
-    frame.appendChild(caption);
+    frame.appendChild(bottom);
     dialog.appendChild(frame);
     document.body.appendChild(dialog);
 
