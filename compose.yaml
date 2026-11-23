@@ -1,0 +1,41 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: media-catalog-server:local
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # Server configuration, media archive, and catalog data: all read-only.
+      # The importer's state root is deliberately not mounted.
+      - type: bind
+        source: ./config/media-catalog.toml
+        target: /etc/media-catalog/media-catalog.toml
+        read_only: true
+      - type: bind
+        source: ./media
+        target: /media
+        read_only: true
+      - type: bind
+        source: ./data
+        target: /data
+        read_only: true
+
+    environment:
+      # Empty disables access control.
+      MEDIA_CATALOG_TOKEN: "${MEDIA_CATALOG_TOKEN:-}"
+
+    # Match the host owner of ./media and ./data; the image defaults to 10001:10001.
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m

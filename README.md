@@ -612,6 +612,15 @@ A TLS-terminating reverse proxy may sit in front of the server; it must pass
 `Authorization`, `Range`, and `If-Range` and avoid buffering `/media/`. The
 server itself speaks plain HTTP.
 
+### Docker
+
+A server-only container image and a single-service Compose example are described
+in [`docs/deploy/docker.md`](docs/deploy/docker.md). The image contains
+`media-catalog-server` only; it does not include the `media-catalog` importer,
+`ffmpeg`, `ffprobe`, or a scheduler. Generate the catalog with the host importer,
+then mount `media/` and `data/` read-only and leave the state root with the
+importer.
+
 ### Upgrading from the catalog-root layout
 
 Older deployments used `--catalog-root` with a `public/` wrapper. The binaries no

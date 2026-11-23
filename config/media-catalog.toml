@@ -1,0 +1,6 @@
+# Example configuration for the container deployment.
+# Paths are container paths; compose.yaml bind-mounts the host directories.
+media_root = "/media"
+data_root = "/data"
+bind = "0.0.0.0:8080"
+max_streams = 8
