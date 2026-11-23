@@ -270,6 +270,30 @@ footer {
   background: rgba(0, 0, 0, 0.82);
 }
 
+.viewer.is-immersive {
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: #000;
+}
+
+.viewer.is-immersive::backdrop {
+  background: #000;
+}
+
+.viewer.is-chrome-hidden .viewer-top,
+.viewer.is-chrome-hidden .viewer-controls,
+.viewer.is-chrome-hidden .viewer-caption {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .viewer-frame {
   display: flex;
   flex-direction: column;
@@ -284,6 +308,7 @@ footer {
   gap: 1rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  transition: opacity 0.2s ease;
 }
 
 .viewer-position {
@@ -349,6 +374,7 @@ footer {
   gap: 0.4rem;
   padding: 0.5rem 0.75rem;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
+  transition: opacity 0.2s ease;
 }
 
 .viewer-button {
@@ -387,6 +413,7 @@ footer {
 .viewer-caption {
   padding: 0.55rem 0.75rem 0.7rem;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
+  transition: opacity 0.2s ease;
 }
 
 .viewer-captured {

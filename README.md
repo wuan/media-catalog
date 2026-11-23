@@ -509,6 +509,17 @@ link behavior.
 - **Navigation:** use the Previous/Next controls, the Left/Right arrow keys, or a
   horizontal swipe while an image is at fit scale. Arrow keys keep navigating
   while an image is zoomed.
+- **Immersive mode:** use the Immersive control or press `f` to fill the window.
+  The top, control, and caption chrome hides after a short idle and returns on
+  pointer movement, a tap, the wheel, a key press, or keyboard focus. Escape
+  leaves immersive mode first and closes the viewer on the next press.
+- **Slideshow:** press Play or `s` to advance through the album every 5 seconds.
+  Playback never starts on its own, stops on the last item, and restarts from the
+  first item when Play is pressed on the last item. Manual navigation, zoom,
+  pan, opening the original, or switching tabs pauses it until Play is pressed
+  again. A video pauses playback and waits for the visitor; pressing Play on a
+  video advances to the next item and resumes there. Closing the viewer clears
+  the timer, so reopening always starts paused.
 - **Images:** the thumbnail is shown while the original loads, each newly opened
   item starts at fit scale, and pinch, wheel, double-tap/double-click, and
   `+`/`-`/`0` zoom with panning clamped to the viewport. Zoom resets when
@@ -525,7 +536,11 @@ link behavior.
   preserved alongside `item`; a stale item path opens nothing and leaves the
   grid usable.
 - **Accessibility:** the viewer is a modal dialog with labelled controls, focus
-  containment, an announced current position, and reduced-motion styles.
+  containment, an announced current position, and reduced-motion styles. The
+  play/pause and immersive controls are keyboard reachable and report their
+  pressed state. Automatic advances update the position quietly; live
+  announcements return when playback is paused. Hidden immersive chrome comes
+  back on Tab, and focus stays inside the viewer.
 - **Fallback:** tile anchors stay regular links to `/media/`. If the viewer
   script is unavailable or fails to initialize, tiles continue to open the
   original file directly.
@@ -541,6 +556,23 @@ Browser verification checklist for the video and focus paths:
   last items disable the matching direction.
 - Play a video, navigate away, and confirm audio stops; reopen and confirm it
   starts paused.
+- Toggle immersive mode with the control and with `f`; wait for the chrome to
+  hide, then move the pointer or press Tab and confirm it returns.
+- Press Escape in immersive mode and confirm the viewer stays open; press Escape
+  again and confirm it closes.
+- Start the slideshow with Play and `s`; confirm it advances every 5 seconds,
+  stops on the last item, and restarts from the first when Play is pressed there.
+- Navigate manually or zoom during playback and confirm it pauses; switch tabs
+  and confirm it stays paused until Play is pressed.
+- With a mixed album, let the slideshow reach a video and confirm it pauses
+  without autoplaying; press Play and confirm it advances and resumes.
+- Close the viewer mid-playback and reopen it from a tile and from `?item=`;
+  confirm it starts paused and no timer fires.
+- Use only the keyboard: Tab to Play and Immersive, confirm their pressed state,
+  toggle both, and confirm Tab reveals hidden immersive chrome. Start playback
+  and confirm the position line does not announce every automatic advance.
+- Enable the reduced-motion preference and confirm the viewer still hides and
+  reveals chrome and the slideshow remains usable.
 - Focus the video player and press Left/Right to confirm native seeking; move
   focus off the player and confirm the arrows navigate again.
 - Close with the control, backdrop, and Escape and confirm focus returns to the

@@ -278,6 +278,7 @@ async fn renders_catalog_pages_and_hides_state() {
     let css = String::from_utf8_lossy(&body);
     assert!(css.contains(".site-header"));
     assert!(css.contains(".viewer-stage"));
+    assert!(css.contains(".viewer.is-immersive"));
     assert!(css.contains("prefers-reduced-motion"));
     assert!(!css.contains("obsolete css"));
 

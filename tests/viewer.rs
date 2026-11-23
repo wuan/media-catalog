@@ -41,6 +41,14 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["previous"], 0);
     assert_eq!(result["beforeFirst"], -1);
     assert_eq!(result["afterLast"], -1);
+    assert_eq!(result["slideshowAdvance"], 1);
+    assert_eq!(result["slideshowAtLast"], -1);
+    assert_eq!(result["slideshowRestart"], 0);
+    assert_eq!(result["slideshowAdvanceFromMiddle"], 2);
+    assert_eq!(result["slideshowResume"], 1);
+    assert_eq!(result["slideshowSingle"], -1);
+    assert_eq!(result["slideshowInterval"], 5000);
+    assert_eq!(result["idleChrome"], 2500);
     assert_eq!(result["zoomLow"], 1.0);
     assert_eq!(result["zoomHigh"], 4.0);
     assert_eq!(result["panFit"]["x"], 0.0);

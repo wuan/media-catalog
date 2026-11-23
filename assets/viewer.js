@@ -10,6 +10,9 @@
   // Wait this long on an item before fetching its original, so holding an
   // arrow key to browse only loads thumbnails for the items passed over.
   var ORIGINAL_DELAY_MS = 200;
+  var SLIDESHOW_INTERVAL_MS = 5000;
+  // Hide immersive chrome after this much pointer, touch, and keyboard idle.
+  var IDLE_CHROME_MS = 2500;
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -46,6 +49,20 @@
   function nextIndex(index, direction, length) {
     var next = index + direction;
     return next < 0 || next >= length ? -1 : next;
+  }
+
+  // Pure slideshow target: normal advance, -1 at the last item, or the first
+  // item when playback is (re)started from the last item. Lengths below two
+  // cannot advance, so the slideshow never sets a timer for them.
+  function slideshowTarget(index, length, restarting) {
+    if (index < 0 || length < 2) {
+      return -1;
+    }
+    if (restarting) {
+      return index >= length - 1 ? 0 : index;
+    }
+    var next = index + 1;
+    return next < length ? next : -1;
   }
 
   function swipeThreshold(stageWidth) {
@@ -165,7 +182,12 @@
     media: null,
     pendingItem: null,
     originalTimer: null,
-    originalLoader: null
+    originalLoader: null,
+    playing: false,
+    slideshowTimer: null,
+    immersive: false,
+    idleTimer: null,
+    chromeHidden: false
   };
 
   var dialog = null;
@@ -182,6 +204,8 @@
   var zoomInButton = null;
   var zoomOutButton = null;
   var resetButton = null;
+  var immersiveButton = null;
+  var playButton = null;
   var pointers = new Map();
   var gesture = null;
   var lastTap = null;
@@ -226,9 +250,17 @@
     controls.className = "viewer-controls";
     prevButton = controlButton("viewer-prev", "Previous item", "Previous");
     nextButton = controlButton("viewer-next", "Next item", "Next");
+    playButton = controlButton("viewer-play", "Play slideshow", "Play");
+    playButton.setAttribute("aria-pressed", "false");
     zoomOutButton = controlButton("viewer-zoom-out", "Zoom out", "−");
     zoomInButton = controlButton("viewer-zoom-in", "Zoom in", "+");
     resetButton = controlButton("viewer-reset", "Reset zoom", "Reset");
+    immersiveButton = controlButton(
+      "viewer-immersive",
+      "Enter immersive mode",
+      "Immersive"
+    );
+    immersiveButton.setAttribute("aria-pressed", "false");
     originalLink = document.createElement("a");
     originalLink.className = "viewer-original";
     originalLink.target = "_blank";
@@ -236,9 +268,11 @@
     originalLink.textContent = "Open original";
     controls.appendChild(prevButton);
     controls.appendChild(nextButton);
+    controls.appendChild(playButton);
     controls.appendChild(zoomOutButton);
     controls.appendChild(zoomInButton);
     controls.appendChild(resetButton);
+    controls.appendChild(immersiveButton);
     controls.appendChild(originalLink);
 
     var caption = document.createElement("div");
@@ -269,12 +303,20 @@
     });
     dialog.addEventListener("cancel", function (event) {
       event.preventDefault();
-      close();
+      if (state.immersive) {
+        setImmersive(false);
+      } else {
+        close();
+      }
     });
     dialog.addEventListener("close", function () {
       state.open = false;
     });
     dialog.addEventListener("keydown", onKeyDown);
+    dialog.addEventListener("pointermove", revealChrome);
+    dialog.addEventListener("pointerdown", revealChrome);
+    dialog.addEventListener("wheel", revealChrome, { passive: true });
+    dialog.addEventListener("focusin", revealChrome);
 
     closeButton.addEventListener("click", close);
     prevButton.addEventListener("click", function () {
@@ -283,14 +325,26 @@
     nextButton.addEventListener("click", function () {
       step(1);
     });
+    playButton.addEventListener("click", toggleSlideshow);
     zoomInButton.addEventListener("click", function () {
       zoomAt(1.3, { x: 0, y: 0 });
     });
     zoomOutButton.addEventListener("click", function () {
       zoomAt(1 / 1.3, { x: 0, y: 0 });
     });
-    resetButton.addEventListener("click", resetZoom);
+    resetButton.addEventListener("click", function () {
+      pauseSlideshow();
+      resetZoom();
+    });
+    originalLink.addEventListener("click", pauseSlideshow);
+    immersiveButton.addEventListener("click", function () {
+      setImmersive(!state.immersive);
+      if (state.immersive) {
+        stage.focus();
+      }
+    });
 
+    stage.setAttribute("tabindex", "-1");
     stage.addEventListener("pointerdown", onPointerDown);
     stage.addEventListener("pointermove", onPointerMove);
     stage.addEventListener("pointerup", onPointerUp);
@@ -308,7 +362,191 @@
     return button;
   }
 
+  function updateImmersiveControl() {
+    if (!immersiveButton) {
+      return;
+    }
+    immersiveButton.setAttribute(
+      "aria-pressed",
+      state.immersive ? "true" : "false"
+    );
+    immersiveButton.setAttribute(
+      "aria-label",
+      state.immersive ? "Exit immersive mode" : "Enter immersive mode"
+    );
+  }
+
+  function setImmersive(enabled) {
+    if (!dialog) {
+      return;
+    }
+    state.immersive = enabled;
+    dialog.classList.toggle("is-immersive", enabled);
+    updateImmersiveControl();
+    if (enabled) {
+      scheduleChromeHide();
+    } else {
+      clearChromeTimer();
+      dialog.classList.remove("is-chrome-hidden");
+      state.chromeHidden = false;
+    }
+    if (state.open && state.mediaKind === "image") {
+      measureStage();
+      measureFit();
+      clampState();
+      applyTransform();
+    }
+  }
+
+  function clearChromeTimer() {
+    if (state.idleTimer) {
+      clearTimeout(state.idleTimer);
+      state.idleTimer = null;
+    }
+  }
+
+  function scheduleChromeHide() {
+    clearChromeTimer();
+    if (!state.immersive || !state.open) {
+      return;
+    }
+    state.idleTimer = window.setTimeout(hideChrome, IDLE_CHROME_MS);
+  }
+
+  function hideChrome() {
+    state.idleTimer = null;
+    if (!state.immersive || !dialog) {
+      return;
+    }
+    var active = document.activeElement;
+    // Keep the chrome visible while a control owns focus so a keyboard user
+    // never loses the control they are on; the stage does not count.
+    if (active && active !== dialog && active !== stage && dialog.contains(active)) {
+      return;
+    }
+    dialog.classList.add("is-chrome-hidden");
+    state.chromeHidden = true;
+  }
+
+  function revealChrome() {
+    if (!state.immersive || !dialog) {
+      return;
+    }
+    if (state.chromeHidden) {
+      dialog.classList.remove("is-chrome-hidden");
+      state.chromeHidden = false;
+    }
+    scheduleChromeHide();
+  }
+
+  function updatePlayControl() {
+    if (!playButton) {
+      return;
+    }
+    playButton.setAttribute(
+      "aria-pressed",
+      state.playing ? "true" : "false"
+    );
+    playButton.textContent = state.playing ? "Pause" : "Play";
+    playButton.setAttribute(
+      "aria-label",
+      state.playing ? "Pause slideshow" : "Play slideshow"
+    );
+  }
+
+  function setPositionLive(live) {
+    if (!position) {
+      return;
+    }
+    position.setAttribute("aria-live", live ? "polite" : "off");
+  }
+
+  function toggleSlideshow() {
+    if (state.playing) {
+      pauseSlideshow();
+    } else {
+      startSlideshow();
+    }
+  }
+
+  function startSlideshow() {
+    if (!state.open) {
+      return;
+    }
+    var item = state.items[state.index];
+    var target = slideshowTarget(
+      state.index,
+      state.items.length,
+      !item || item.kind !== "video"
+    );
+    if (target === -1) {
+      pauseSlideshow();
+      return;
+    }
+    if (target !== state.index) {
+      goTo(target);
+    }
+    if (state.items[state.index].kind === "video") {
+      pauseSlideshow();
+      return;
+    }
+    state.playing = true;
+    updatePlayControl();
+    setPositionLive(false);
+    scheduleSlideshow();
+  }
+
+  function pauseSlideshow() {
+    state.playing = false;
+    clearSlideshowTimer();
+    updatePlayControl();
+    setPositionLive(true);
+  }
+
+  function scheduleSlideshow() {
+    clearSlideshowTimer();
+    if (!state.playing || !state.open) {
+      return;
+    }
+    state.slideshowTimer = window.setTimeout(
+      advanceSlideshow,
+      SLIDESHOW_INTERVAL_MS
+    );
+  }
+
+  function clearSlideshowTimer() {
+    if (state.slideshowTimer) {
+      clearTimeout(state.slideshowTimer);
+      state.slideshowTimer = null;
+    }
+  }
+
+  function advanceSlideshow() {
+    state.slideshowTimer = null;
+    if (!state.playing || !state.open) {
+      return;
+    }
+    var next = slideshowTarget(state.index, state.items.length, false);
+    if (next === -1) {
+      pauseSlideshow();
+      return;
+    }
+    goTo(next);
+    if (state.items[next].kind === "video") {
+      pauseSlideshow();
+      return;
+    }
+    scheduleSlideshow();
+  }
+
+  function goTo(index) {
+    state.index = index;
+    showItem();
+    updateUrl(state.items[index].path);
+  }
+
   function onKeyDown(event) {
+    revealChrome();
     if (event.key === "Tab") {
       trapFocus(event);
       return;
@@ -327,8 +565,23 @@
     }
 
     if (event.key === "Escape") {
+      // The dialog's cancel event owns Escape so immersive mode can take the
+      // first press and the next press still closes the viewer.
+      return;
+    }
+
+    if (event.key === "f" || event.key === "F") {
       event.preventDefault();
-      close();
+      setImmersive(!state.immersive);
+      if (state.immersive) {
+        stage.focus();
+      }
+      return;
+    }
+
+    if (event.key === "s" || event.key === "S") {
+      event.preventDefault();
+      toggleSlideshow();
       return;
     }
 
@@ -400,6 +653,7 @@
 
   function showAt(index, deepLinked) {
     ensureDialog();
+    pauseSlideshow();
     state.index = index;
     state.open = true;
     state.scale = MIN_ZOOM;
@@ -674,6 +928,7 @@
     if (state.mediaKind !== "image") {
       return;
     }
+    pauseSlideshow();
     var next = zoomAroundPoint(state.scale, state.x, state.y, factor, point);
     state.scale = next.scale;
     state.x = next.x;
@@ -755,6 +1010,7 @@
         gesture.moved = true;
       }
       if (state.scale > MIN_ZOOM) {
+        pauseSlideshow();
         state.x = gesture.x + dx;
         state.y = gesture.y + dy;
         clampState();
@@ -766,6 +1022,7 @@
       if (gesture.startDistance <= 0) {
         return;
       }
+      pauseSlideshow();
       var nextScale = clampZoom(
         gesture.startScale * (currentDistance / gesture.startDistance)
       );
@@ -854,6 +1111,7 @@
   }
 
   function toggleZoom(point) {
+    pauseSlideshow();
     var now = Date.now();
     if (now - lastToggle < 350) {
       return;
@@ -892,9 +1150,8 @@
     if (next === -1) {
       return;
     }
-    state.index = next;
-    showItem();
-    updateUrl(state.items[next].path);
+    pauseSlideshow();
+    goTo(next);
   }
 
   function close() {
@@ -905,7 +1162,9 @@
     var lastItem = state.items[state.index];
     cancelOriginal();
     teardownVideo();
+    pauseSlideshow();
     state.open = false;
+    setImmersive(false);
     state.opener = null;
     state.items = [];
     state.index = -1;
@@ -1050,6 +1309,11 @@
       refreshAlbum();
       tryPendingItem();
     });
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) {
+        pauseSlideshow();
+      }
+    });
     window.addEventListener("resize", function () {
       if (!state.open || state.mediaKind !== "image") {
         return;
@@ -1081,6 +1345,8 @@
     MAX_ZOOM: MAX_ZOOM,
     DOUBLE_TAP_ZOOM: DOUBLE_TAP_ZOOM,
     ORIGINAL_DELAY_MS: ORIGINAL_DELAY_MS,
+    SLIDESHOW_INTERVAL_MS: SLIDESHOW_INTERVAL_MS,
+    IDLE_CHROME_MS: IDLE_CHROME_MS,
     clamp: clamp,
     clampZoom: clampZoom,
     clampPan: clampPan,
@@ -1089,6 +1355,7 @@
     buildItemUrl: buildItemUrl,
     albumIndexOf: albumIndexOf,
     nextIndex: nextIndex,
+    slideshowTarget: slideshowTarget,
     swipeThreshold: swipeThreshold,
     isSwipe: isSwipe,
     tileFromElement: tileFromElement,
