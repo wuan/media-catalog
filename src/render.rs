@@ -443,7 +443,10 @@ mod tests {
         let html = render_month(&catalog, 2024, 5).unwrap().unwrap();
         assert!(html.contains("data-size=\"3400000\""));
         assert_eq!(html.matches("data-size=").count(), 1);
-        assert!(!html.contains("3.4 MB"), "tile captions do not show the size");
+        assert!(
+            !html.contains("3.4 MB"),
+            "tile captions do not show the size"
+        );
     }
 
     #[test]

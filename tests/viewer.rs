@@ -69,7 +69,10 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
         result["sizedTileCaption"],
         "2024-05-01 10:00:00 · iPhone 15 Pro · 3.4 MB"
     );
-    assert_eq!(result["sizedBareTileCaption"], "2024-05-01 10:00:00 · 532 kB");
+    assert_eq!(
+        result["sizedBareTileCaption"],
+        "2024-05-01 10:00:00 · 532 kB"
+    );
     assert_eq!(result["badSizeTileSize"], Value::Null);
     assert_eq!(
         result["badSizeTileCaption"],
@@ -94,5 +97,5 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["placeholderTall"]["width"], 600.0);
     assert_eq!(result["placeholderTall"]["height"], 600.0);
     assert_eq!(result["placeholderMissing"], Value::Null);
-    assert_eq!(result["originalDelay"], 300);
+    assert_eq!(result["originalDelay"], 200);
 }

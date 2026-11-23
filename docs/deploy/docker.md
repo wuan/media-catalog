@@ -26,9 +26,9 @@ From the repository root:
 docker build -t media-catalog-server:local .
 ```
 
-The build context excludes `.git`, `target/`, `media/`, `data/`, `state/`,
-`public/`, and local deployment artifacts (`.env`, Compose overrides), so the
-archive and catalog data are never sent to the builder.
+The build context excludes `.git`, `.github`, `target/`, `media/`, `data/`,
+`state/`, `public/`, and local deployment artifacts (`.env`, Compose overrides),
+so the archive and catalog data are never sent to the builder.
 
 Verify the image directly:
 
@@ -42,6 +42,20 @@ docker run --rm --entrypoint sh media-catalog-server:local -c \
 `media-catalog-server --help` must print usage and exit successfully. The last
 command exits successfully only when the importer binary and both media tools
 are absent.
+
+## Published image
+
+Pushes to `main` and tags matching `v*` publish the image to GitHub Container
+Registry:
+
+```sh
+docker pull ghcr.io/wuan/media-catalog:latest
+docker run --rm ghcr.io/wuan/media-catalog:latest --help
+```
+
+The tag names follow the git ref: `latest` for the default branch, `main` and
+`sha-<commit>` for branch builds, and the semantic version for release tags.
+Pull requests build the image without pushing and smoke-test it with `--help`.
 
 ## Entrypoint
 

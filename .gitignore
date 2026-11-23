@@ -4,6 +4,7 @@
 /media/
 *.snap.new
 .envrc
+lcov.info
 
 .agents
 .claude

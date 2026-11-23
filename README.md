@@ -1,5 +1,8 @@
 # media-catalog
 
+[![CI](https://github.com/wuan/media-catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/wuan/media-catalog/actions/workflows/ci.yml)
+[![Docker image](https://github.com/wuan/media-catalog/actions/workflows/docker.yml/badge.svg)](https://github.com/wuan/media-catalog/actions/workflows/docker.yml)
+
 Generate and serve a fast catalog for a photo/video archive laid out as
 `YYYY/MM`. The generator scans the archive read-only, extracts safe metadata,
 produces one WebP thumbnail per item, and publishes sharded JSON. The Rust server

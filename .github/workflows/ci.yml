@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Rust build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build binaries
+        run: cargo build --locked --bins
+
+      - name: Build tests and examples
+        run: cargo build --locked --all-targets
+
+      - name: Build release server
+        run: cargo build --locked --release --bin media-catalog-server
+
+  test:
+    name: Rust test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.100.0
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js for the JavaScript harness
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The video probe, thumbnail, and pipeline tests are skipped when ffmpeg is
+      # missing. Install it so the full suite runs on CI.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ffmpeg
+
+      - name: Run tests
+        run: cargo test --locked --all-targets
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install Node.js for the JavaScript harness
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ffmpeg
+
+      - name: Collect coverage
+        run: cargo llvm-cov --locked --all-targets --lcov --output-path lcov.info
+
+      - name: Print coverage summary
+        run: cargo llvm-cov report
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: error
+
+  verify:
+    name: Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint with clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install OpenSpec
+        run: npm install --global @fission-ai/openspec@2.1.1
+
+      - name: Validate specs and changes
+        # Non-strict: existing specs carry long-requirement warnings that strict
+        # mode turns into failures. Structural errors still fail the check.
+        run: openspec validate --all --no-interactive
+
+      - name: Validate Compose example
+        run: docker compose config --quiet
+
+      - name: Check JavaScript assets
+        run: |
+          for asset in assets/*.js tests/js/*.mjs; do
+            node --check "$asset"
+          done
