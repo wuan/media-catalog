@@ -131,3 +131,33 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["placeholderMissing"], Value::Null);
     assert_eq!(result["originalDelay"], 200);
 }
+
+#[test]
+fn viewer_browser_regression_matches_rendered_stage() {
+    let node_available = Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !node_available {
+        eprintln!("skipping viewer browser test: node is unavailable");
+        return;
+    }
+
+    let script = format!("{}/tests/js/viewer_browser.mjs", env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("node").arg(script.as_str()).output().unwrap();
+    if output.status.code() == Some(77) {
+        eprintln!(
+            "skipping viewer browser test: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        return;
+    }
+
+    assert!(
+        output.status.success(),
+        "viewer browser test failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -228,6 +228,7 @@
   var lastTap = null;
   var lastToggle = 0;
   var observer = null;
+  var resizeObserver = null;
 
   function ensureDialog() {
     if (dialog) {
@@ -386,6 +387,8 @@
     stage.addEventListener("pointercancel", onPointerCancel);
     stage.addEventListener("dblclick", onDoubleClick);
     stage.addEventListener("wheel", onWheel, { passive: false });
+
+    watchStage();
   }
 
   function controlButton(className, label, text) {
@@ -430,6 +433,7 @@
       measureFit();
       clampState();
       applyTransform();
+      updatePreviewSize();
     }
   }
 
@@ -833,14 +837,9 @@
     cancelOriginal();
     teardownVideo();
     error.hidden = true;
-    measureStage();
 
-    if (item.kind === "video") {
-      renderVideo(item);
-    } else {
-      renderImage(item);
-    }
-
+    // Fill the chrome first so the stage measurement describes the layout that
+    // the visitor actually sees, then size the preview from that stage.
     position.textContent =
       "Item " + (state.index + 1) + " of " + state.items.length;
     captured.textContent = captionText(item);
@@ -870,6 +869,15 @@
     zoomInButton.disabled = item.kind === "video";
     zoomOutButton.disabled = item.kind === "video";
     resetButton.disabled = item.kind === "video";
+
+    measureStage();
+
+    if (item.kind === "video") {
+      renderVideo(item);
+    } else {
+      renderImage(item);
+    }
+
     if (item.kind !== "image") {
       scheduleOriginal(function () {
         preloadNeighbours();
@@ -894,11 +902,7 @@
 
     if (item.thumbUrl && item.width && item.height) {
       image.classList.add("is-placeholder");
-      var box = placeholderBox(item.width, item.height, state.stageWidth, state.stageHeight);
-      if (box) {
-        image.style.width = box.width + "px";
-        image.style.height = box.height + "px";
-      }
+      updatePreviewSize();
     }
 
     image.addEventListener("load", measureFit);
@@ -1037,6 +1041,36 @@
     var rect = stage.getBoundingClientRect();
     state.stageWidth = rect.width;
     state.stageHeight = rect.height;
+  }
+
+  // Keep the square center-crop placeholder matched to the shorter edge of the
+  // original's fitted box in the stage that is currently rendered.
+  function updatePreviewSize() {
+    var media = state.media;
+    if (!media || state.mediaKind !== "image") {
+      return;
+    }
+    if (!media.classList.contains("is-placeholder")) {
+      media.style.width = "";
+      media.style.height = "";
+      return;
+    }
+    var item = state.items[state.index];
+    if (!item || !item.width || !item.height) {
+      return;
+    }
+    var rect = stage.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+    state.stageWidth = rect.width;
+    state.stageHeight = rect.height;
+    var box = placeholderBox(item.width, item.height, rect.width, rect.height);
+    if (!box) {
+      return;
+    }
+    media.style.width = box.width + "px";
+    media.style.height = box.height + "px";
   }
 
   function applyTransform() {
@@ -1384,6 +1418,27 @@
     }
   }
 
+  function watchStage() {
+    if (resizeObserver || typeof ResizeObserver === "undefined" || !stage) {
+      return;
+    }
+    resizeObserver = new ResizeObserver(function () {
+      if (!state.open || state.mediaKind !== "image") {
+        return;
+      }
+      var rect = stage.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        return;
+      }
+      measureStage();
+      measureFit();
+      clampState();
+      applyTransform();
+      updatePreviewSize();
+    });
+    resizeObserver.observe(stage);
+  }
+
   function stopObserver() {
     if (observer) {
       observer.disconnect();
@@ -1458,6 +1513,7 @@
       measureFit();
       clampState();
       applyTransform();
+      updatePreviewSize();
     });
 
     var ready = function () {

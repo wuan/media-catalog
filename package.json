@@ -1,0 +1,11 @@
+{
+  "name": "media-catalog",
+  "private": true,
+  "description": "Browser regression tooling for the media catalog viewer",
+  "scripts": {
+    "test:viewer": "node tests/js/viewer_browser.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  }
+}

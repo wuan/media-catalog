@@ -34,6 +34,28 @@ The binaries are `target/release/media-catalog` (generator) and
 Performance measurements for a real-archive subset and a synthetic 75k-item tree
 are recorded in [`docs/performance.md`](docs/performance.md).
 
+### JavaScript and browser tests
+
+The viewer's helper logic runs under Node, and its rendered preview has a
+Chromium regression test. Install the browser tooling once:
+
+```sh
+npm install
+npx playwright install chromium
+```
+
+Run the browser regression directly, or through the Rust test entry points:
+
+```sh
+node tests/js/viewer_browser.mjs
+cargo test --test viewer
+```
+
+`cargo test` runs the browser regression through `tests/viewer.rs`. It skips with
+exit code `77` and a diagnostic when Node, Playwright, or Chromium is unavailable,
+so the Rust suite still works on machines without browser tooling. CI installs
+Playwright and Chromium so the regression always runs there.
+
 ## Quick start
 
 Organize the originals by folder; the folder path is the authoritative grouping:
