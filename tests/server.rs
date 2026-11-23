@@ -115,6 +115,7 @@ fn item(path: &str, kind: MediaKind) -> CatalogItemInput {
         duration_ms: None,
         thumb_version: Some("1".to_string()),
         thumb_available: true,
+        ..CatalogItemInput::default()
     }
 }
 

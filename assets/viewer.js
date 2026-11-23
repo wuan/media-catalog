@@ -117,6 +117,14 @@
     };
   }
 
+  function optionalNumber(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    var number = Number(value);
+    return isFinite(number) ? number : null;
+  }
+
   function tileFromElement(element) {
     var mediaUrl = element.getAttribute("href") || "";
     var path = element.getAttribute("data-item-path") || "";
@@ -150,6 +158,12 @@
       thumbUrl: element.getAttribute("data-thumb-url") || "",
       width: width > 0 ? width : null,
       height: height > 0 ? height : null,
+      fNumber: optionalNumber(element.getAttribute("data-f-number")),
+      exposure: element.getAttribute("data-exposure") || "",
+      iso: optionalNumber(element.getAttribute("data-iso")),
+      focal: optionalNumber(element.getAttribute("data-focal")),
+      latitude: optionalNumber(element.getAttribute("data-lat")),
+      longitude: optionalNumber(element.getAttribute("data-lon")),
       mediaUrl: mediaUrl,
       alt: alt,
       name: name || path,
@@ -196,6 +210,9 @@
   var wrap = null;
   var position = null;
   var captured = null;
+  var meta = null;
+  var location = null;
+  var locationLink = null;
   var error = null;
   var prevButton = null;
   var nextButton = null;
@@ -281,12 +298,26 @@
     captured = document.createElement("p");
     captured.className = "viewer-captured";
     captured.id = "viewer-captured";
+    meta = document.createElement("p");
+    meta.className = "viewer-meta";
+    meta.id = "viewer-meta";
+    meta.hidden = true;
+    location = document.createElement("p");
+    location.className = "viewer-location";
+    location.hidden = true;
+    locationLink = document.createElement("a");
+    locationLink.target = "_blank";
+    locationLink.rel = "noopener noreferrer";
+    locationLink.referrerPolicy = "no-referrer";
+    location.appendChild(locationLink);
     error = document.createElement("p");
     error.className = "viewer-error";
     error.hidden = true;
     error.textContent =
       "This item cannot be played here. Use the original link to open it.";
     caption.appendChild(captured);
+    caption.appendChild(meta);
+    caption.appendChild(location);
     caption.appendChild(error);
 
     var bottom = document.createElement("div");
@@ -711,6 +742,91 @@
       .join(" · ");
   }
 
+  function trimDecimal(value) {
+    var text = Number(value).toFixed(1);
+    return text.slice(-2) === ".0" ? text.slice(0, -2) : text;
+  }
+
+  function formatExposure(value) {
+    var text = String(value == null ? "" : value).trim();
+    if (text === "") {
+      return "";
+    }
+    var parts = text.split("/");
+    if (parts.length === 2) {
+      var numerator = Number(parts[0]);
+      var denominator = Number(parts[1]);
+      if (
+        isFinite(numerator) &&
+        isFinite(denominator) &&
+        numerator > 0 &&
+        denominator > 0
+      ) {
+        if (numerator < denominator) {
+          return numerator + "/" + denominator + " s";
+        }
+        return trimDecimal(numerator / denominator) + " s";
+      }
+    }
+    var seconds = Number(text);
+    if (isFinite(seconds) && seconds >= 0) {
+      return trimDecimal(seconds) + " s";
+    }
+    return "";
+  }
+
+  function metadataText(item) {
+    var parts = [];
+    if (item.focal !== null && item.focal !== undefined) {
+      parts.push(trimDecimal(item.focal) + " mm");
+    }
+    if (item.fNumber !== null && item.fNumber !== undefined) {
+      parts.push("f/" + trimDecimal(item.fNumber));
+    }
+    var exposure = formatExposure(item.exposure);
+    if (exposure) {
+      parts.push(exposure);
+    }
+    if (item.iso !== null && item.iso !== undefined) {
+      parts.push("ISO " + Math.round(item.iso));
+    }
+    return parts.join(" · ");
+  }
+
+  function hasLocation(item) {
+    return (
+      typeof item.latitude === "number" &&
+      typeof item.longitude === "number" &&
+      isFinite(item.latitude) &&
+      isFinite(item.longitude)
+    );
+  }
+
+  function formatCoordinates(latitude, longitude) {
+    return Number(latitude).toFixed(4) + ", " + Number(longitude).toFixed(4);
+  }
+
+  function locationUrl(latitude, longitude) {
+    return (
+      "https://www.openstreetmap.org/?mlat=" +
+      latitude +
+      "&mlon=" +
+      longitude +
+      "#map=16/" +
+      latitude +
+      "/" +
+      longitude
+    );
+  }
+
+  function locationLabel(latitude, longitude) {
+    return (
+      "Open location " +
+      formatCoordinates(latitude, longitude) +
+      " on OpenStreetMap (opens in a new tab)"
+    );
+  }
+
   function showItem() {
     var item = state.items[state.index];
     resetZoom();
@@ -728,6 +844,22 @@
     position.textContent =
       "Item " + (state.index + 1) + " of " + state.items.length;
     captured.textContent = captionText(item);
+    var metadata = metadataText(item);
+    meta.textContent = metadata;
+    meta.hidden = metadata === "";
+    location.hidden = !hasLocation(item);
+    if (hasLocation(item)) {
+      locationLink.href = locationUrl(item.latitude, item.longitude);
+      locationLink.textContent = formatCoordinates(item.latitude, item.longitude);
+      locationLink.setAttribute(
+        "aria-label",
+        locationLabel(item.latitude, item.longitude)
+      );
+    } else {
+      locationLink.removeAttribute("href");
+      locationLink.textContent = "";
+      locationLink.removeAttribute("aria-label");
+    }
     originalLink.href = item.mediaUrl;
     originalLink.setAttribute(
       "aria-label",
@@ -1365,6 +1497,12 @@
     tileFromElement: tileFromElement,
     captionText: captionText,
     formatFileSize: formatFileSize,
+    formatExposure: formatExposure,
+    metadataText: metadataText,
+    hasLocation: hasLocation,
+    formatCoordinates: formatCoordinates,
+    locationUrl: locationUrl,
+    locationLabel: locationLabel,
     fittedBox: fittedBox,
     placeholderBox: placeholderBox
   };

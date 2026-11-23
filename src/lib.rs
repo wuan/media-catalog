@@ -223,7 +223,13 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
             file.mtime_ns,
         );
         database.set_thumb(&file.rel_path, None, None, ThumbStatus::Unsupported, None)?;
-        database.set_probe(&file.rel_path, None, None, None, Some(&fallback), None)?;
+        database.set_probe(
+            &file.rel_path,
+            &ProbeResult {
+                captured_at: Some(fallback),
+                ..ProbeResult::default()
+            },
+        )?;
         summary.thumbnails_unsupported += 1;
         summary.unsupported.push(file.rel_path.clone());
     }
@@ -237,13 +243,19 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     let probe_work: Vec<ProbeWork> = scan_result
         .files
         .iter()
-        .filter(|file| is_decodable_extension(&extension(&file.rel_path)))
+        .filter(|file| match file.kind {
+            MediaKind::Image => true,
+            MediaKind::Video => is_decodable_extension(&extension(&file.rel_path)),
+        })
         .filter(|file| {
             let record = records_after_scan.get(&file.rel_path);
+            let decodable = is_decodable_extension(&extension(&file.rel_path));
             new_paths.contains(&file.rel_path)
                 || changed_paths.contains(&file.rel_path)
                 || record
-                    .map(|record| record.width.is_none() || record.captured_at.is_none())
+                    .map(|record| {
+                        record.captured_at.is_none() || (decodable && record.width.is_none())
+                    })
                     .unwrap_or(true)
         })
         .map(|file| ProbeWork {
@@ -264,8 +276,12 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
             .par_iter()
             .map(|work| {
                 let source = config.media_root.join(&work.file.rel_path);
+                let decodable = is_decodable_extension(&extension(&work.file.rel_path));
                 let result = match work.kind {
-                    MediaKind::Image => probe::probe_image(&source, work.file.mtime_ns),
+                    MediaKind::Image if decodable => {
+                        probe::probe_image(&source, work.file.mtime_ns)
+                    }
+                    MediaKind::Image => probe::probe_image_metadata(&source, work.file.mtime_ns),
                     MediaKind::Video => probe::probe_video(&source, work.file.mtime_ns),
                 };
                 let outcome = ProbeOutcome {
@@ -284,24 +300,16 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
     for outcome in probe_results {
         match outcome.result {
             Ok(result) => {
-                database.set_probe(
-                    &outcome.rel_path,
-                    result.width,
-                    result.height,
-                    result.duration_ms,
-                    result.captured_at.as_deref(),
-                    result.model.as_deref(),
-                )?;
+                database.set_probe(&outcome.rel_path, &result)?;
                 summary.probed += 1;
             }
             Err(error) => {
                 database.set_probe(
                     &outcome.rel_path,
-                    None,
-                    None,
-                    None,
-                    Some(&outcome.fallback_captured_at),
-                    None,
+                    &ProbeResult {
+                        captured_at: Some(outcome.fallback_captured_at.clone()),
+                        ..ProbeResult::default()
+                    },
                 )?;
                 push_error(&mut summary, &outcome.rel_path, &format!("{error:#}"));
             }
@@ -448,6 +456,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
         let thumb_available = record
             .map(|record| record.thumb_status == ThumbStatus::Ok)
             .unwrap_or(false);
+        let (latitude, longitude) = published_location(record, config.include_location);
         inputs.push(CatalogItemInput {
             rel_path: file.rel_path.clone(),
             year: file.year,
@@ -464,6 +473,12 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
                 .and_then(|record| record.thumb_version.clone())
                 .filter(|_| thumb_available),
             thumb_available,
+            f_number: record.and_then(|record| record.f_number),
+            exposure: record.and_then(|record| record.exposure),
+            iso: record.and_then(|record| record.iso),
+            focal_length_mm: record.and_then(|record| record.focal_length_mm),
+            latitude,
+            longitude,
         });
     }
 
@@ -547,8 +562,9 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
 }
 
 /// Map a persisted item record to a catalog input row.
-fn record_to_input(record: &state::ItemRecord) -> CatalogItemInput {
+fn record_to_input(record: &state::ItemRecord, include_location: bool) -> CatalogItemInput {
     let thumb_available = record.thumb_status == ThumbStatus::Ok;
+    let (latitude, longitude) = published_location(Some(record), include_location);
     CatalogItemInput {
         rel_path: record.path.clone(),
         year: record.year,
@@ -563,7 +579,26 @@ fn record_to_input(record: &state::ItemRecord) -> CatalogItemInput {
         duration_ms: record.duration_ms,
         thumb_version: record.thumb_version.clone().filter(|_| thumb_available),
         thumb_available,
+        f_number: record.f_number,
+        exposure: record.exposure,
+        iso: record.iso,
+        focal_length_mm: record.focal_length_mm,
+        latitude,
+        longitude,
     }
+}
+
+fn published_location(
+    record: Option<&state::ItemRecord>,
+    include_location: bool,
+) -> (Option<f64>, Option<f64>) {
+    if !include_location {
+        return (None, None);
+    }
+    let Some(record) = record else {
+        return (None, None);
+    };
+    (record.latitude, record.longitude)
 }
 
 /// Events-only fast path: rebuild the catalog from persisted state and republish JSON.
@@ -585,7 +620,10 @@ fn run_events_only(
     };
 
     let items = database.load_items()?;
-    let mut inputs: Vec<CatalogItemInput> = items.values().map(record_to_input).collect();
+    let mut inputs: Vec<CatalogItemInput> = items
+        .values()
+        .map(|record| record_to_input(record, config.include_location))
+        .collect();
     inputs.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
 
     let mut catalog =

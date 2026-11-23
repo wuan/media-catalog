@@ -54,6 +54,16 @@ const result = {
     captured_at: "2024-05-01 10:00:00",
     model: ""
   }),
+  metadataPresent: api.metadataAttributes({
+    f_number: 1.8,
+    exposure_time: "1/125",
+    iso: 100,
+    focal_length_mm: 26,
+    latitude: 52.520008,
+    longitude: 13.404954
+  }),
+  metadataAbsent: api.metadataAttributes({ path: "2024/05/a.jpg" }),
+  metadataWithoutLocation: api.metadataAttributes({ iso: 100 }),
   query: query
 };
 

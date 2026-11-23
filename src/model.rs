@@ -4,11 +4,11 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use crate::paths::{item_name, thumb_url, url_for};
-use crate::probe::timestamp_from_nanos;
+use crate::probe::{timestamp_from_nanos, Exposure};
 use crate::scan::MediaKind;
 
 /// Input row used to build the rendered catalog model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CatalogItemInput {
     pub rel_path: String,
     pub year: i32,
@@ -24,10 +24,16 @@ pub struct CatalogItemInput {
     pub duration_ms: Option<u64>,
     pub thumb_version: Option<String>,
     pub thumb_available: bool,
+    pub f_number: Option<f32>,
+    pub exposure: Option<Exposure>,
+    pub iso: Option<u32>,
+    pub focal_length_mm: Option<f32>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// A single item as exposed to the renderer and JSON writer.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ItemView {
     pub path: String,
     pub name: String,
@@ -45,6 +51,18 @@ pub struct ItemView {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub f_number: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<Exposure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iso: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focal_length_mm: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
     pub thumb_url: Option<String>,
     pub media_url: String,
     pub thumb_available: bool,
@@ -203,6 +221,12 @@ pub fn build_catalog(
             width: item.width,
             height: item.height,
             duration_ms: item.duration_ms,
+            f_number: item.f_number,
+            exposure: item.exposure,
+            iso: item.iso,
+            focal_length_mm: item.focal_length_mm,
+            latitude: item.latitude,
+            longitude: item.longitude,
             thumb_available: available,
             events: Vec::new(),
         };
@@ -268,6 +292,7 @@ mod tests {
             duration_ms: None,
             thumb_version: Some("1-2".to_string()),
             thumb_available: true,
+            ..CatalogItemInput::default()
         }
     }
 

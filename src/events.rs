@@ -531,6 +531,7 @@ mod tests {
             duration_ms: None,
             thumb_version: Some("1-2".to_string()),
             thumb_available: true,
+            ..CatalogItemInput::default()
         }
     }
 

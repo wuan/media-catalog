@@ -69,6 +69,10 @@ pub struct Cli {
     /// Republish the catalog from state without scanning, probing, or thumbnails.
     #[arg(long)]
     pub events_only: bool,
+
+    /// Publish geocoordinates from EXIF and video location tags.
+    #[arg(long)]
+    pub include_location: bool,
 }
 
 /// Optional TOML configuration shared by both binaries. Values here are
@@ -90,6 +94,8 @@ pub struct FileConfig {
     pub allow_mount_drop: Option<bool>,
     pub events_file: Option<PathBuf>,
     pub events_only: Option<bool>,
+    /// Publish geocoordinates. Ignored by the runtime server.
+    pub include_location: Option<bool>,
     /// Socket address for the runtime server. Ignored by the generator.
     pub bind: Option<String>,
     /// Maximum concurrent server media streams. Ignored by the generator.
@@ -142,6 +148,7 @@ pub struct Config {
     /// Authored events file, or `None` when the catalog has no events.
     pub events_file: Option<PathBuf>,
     pub events_only: bool,
+    pub include_location: bool,
 }
 
 impl Config {
@@ -177,6 +184,7 @@ impl Config {
             allow_mount_drop: false,
             events_file: None,
             events_only: false,
+            include_location: false,
         }
     }
 
@@ -221,6 +229,7 @@ impl Config {
         let quiet = cli.quiet || file.quiet.unwrap_or(false);
         let allow_mount_drop = cli.allow_mount_drop || file.allow_mount_drop.unwrap_or(false);
         let events_only = cli.events_only || file.events_only.unwrap_or(false);
+        let include_location = cli.include_location || file.include_location.unwrap_or(false);
 
         let events_file =
             resolve_events_path(cli.events.as_deref().or(file.events_file.as_deref()), &cwd)?;
@@ -240,6 +249,7 @@ impl Config {
             allow_mount_drop,
             events_file,
             events_only,
+            include_location,
         };
         config.validate()?;
         Ok(config)
@@ -967,5 +977,109 @@ mod tests {
         config
             .validate()
             .expect("events-only skips is_dir check too");
+    }
+
+    #[test]
+    fn include_location_flag_enables_location_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let cli = Cli {
+            include_location: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, FileConfig::default(), 2).unwrap();
+        assert!(config.include_location);
+    }
+
+    #[test]
+    fn include_location_toml_key_enables_location_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            include_location: Some(true),
+            ..FileConfig::default()
+        };
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            file,
+            2,
+        )
+        .unwrap();
+        assert!(config.include_location);
+    }
+
+    #[test]
+    fn include_location_flag_wins_over_toml_false() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            include_location: Some(false),
+            ..FileConfig::default()
+        };
+        let cli = Cli {
+            include_location: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, file, 2).unwrap();
+        assert!(config.include_location);
+    }
+
+    #[test]
+    fn include_location_defaults_to_off() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            FileConfig::default(),
+            2,
+        )
+        .unwrap();
+        assert!(!config.include_location);
+    }
+
+    #[test]
+    fn server_parses_include_location_and_ignores_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "media_root = \"./media\"\ninclude_location = true\nbind = \"0.0.0.0:9090\"\n",
+        )
+        .unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
+        assert_eq!(file.include_location, Some(true));
+        assert_eq!(file.bind.as_deref(), Some("0.0.0.0:9090"));
+    }
+
+    #[test]
+    fn include_location_rejects_non_boolean_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "include_location = \"yes\"\n").unwrap();
+        let error = FileConfig::load(Some(&path)).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("include_location"),
+            "{error:#}"
+        );
     }
 }

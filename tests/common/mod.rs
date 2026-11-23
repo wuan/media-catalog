@@ -99,7 +99,7 @@ impl Fixture {
         .save(&plain)
         .expect("plain jpeg");
         let jpeg = std::fs::read(&plain).expect("plain jpeg bytes");
-        let tiff = tiff_with(orientation, datetime, gps);
+        let tiff = tiff_with_metadata(orientation, datetime, gps);
         let mut app1 = Vec::new();
         app1.extend_from_slice(&[0xFF, 0xE1]);
         app1.extend_from_slice(&((2 + 6 + tiff.len()) as u16).to_be_bytes());
@@ -111,6 +111,33 @@ impl Fixture {
         out.extend_from_slice(&app1);
         out.extend_from_slice(&jpeg[2..]);
         std::fs::write(path, out).expect("write exif jpeg");
+    }
+
+    pub fn write_video_with_location(&self, rel: &str, seconds: u32, location: &str) -> bool {
+        if probe::ensure_external_tools().is_err() {
+            return false;
+        }
+        let path = self.media_path(rel);
+        ensure_parent(&path);
+        Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("testsrc=size=64x48:rate=10:duration={seconds}"),
+                "-pix_fmt",
+                "yuv420p",
+                "-metadata",
+                &format!("location={location}"),
+            ])
+            .arg(&path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
     }
 
     pub fn write_video(&self, rel: &str, seconds: u32) -> bool {
@@ -271,6 +298,124 @@ fn tiff_with(orientation: Option<u16>, datetime: Option<&str>, gps: bool) -> Vec
         for numerator in [52u32, 31, 12] {
             data.extend_from_slice(&numerator.to_le_bytes());
             data.extend_from_slice(&1u32.to_le_bytes());
+        }
+    }
+
+    data
+}
+
+fn tiff_with_metadata(orientation: Option<u16>, datetime: Option<&str>, gps: bool) -> Vec<u8> {
+    let datetime_bytes = {
+        let mut bytes = datetime
+            .unwrap_or("2024:05:01 10:11:12")
+            .as_bytes()
+            .to_vec();
+        bytes.resize(20, 0);
+        bytes
+    };
+
+    let ifd0_count = 2 + 1 + gps as usize;
+    let ifd0_size = 2 + ifd0_count * 12 + 4;
+    let exif_offset = 8 + ifd0_size;
+    let exif_count = 5;
+    let exif_size = 2 + exif_count * 12 + 4;
+    let gps_offset = exif_offset + exif_size;
+    let gps_count = 4;
+    let gps_size = if gps { 2 + gps_count * 12 + 4 } else { 0 };
+
+    let data_offset = gps_offset + gps_size;
+    let datetime_offset = data_offset;
+    let aperture_offset = datetime_offset + 20;
+    let exposure_offset = aperture_offset + 8;
+    let focal_offset = exposure_offset + 8;
+    let gps_latitude_offset = focal_offset + 8;
+    let gps_longitude_offset = gps_latitude_offset + 24;
+
+    let mut data = Vec::new();
+    data.extend_from_slice(b"II");
+    data.extend_from_slice(&42u16.to_le_bytes());
+    data.extend_from_slice(&8u32.to_le_bytes());
+
+    data.extend_from_slice(&(ifd0_count as u16).to_le_bytes());
+    data.extend_from_slice(&0x0112u16.to_le_bytes());
+    data.extend_from_slice(&3u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&orientation.unwrap_or(1).to_le_bytes());
+    data.extend_from_slice(&0u16.to_le_bytes());
+    data.extend_from_slice(&0x0132u16.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&20u32.to_le_bytes());
+    data.extend_from_slice(&(datetime_offset as u32).to_le_bytes());
+    data.extend_from_slice(&0x8769u16.to_le_bytes());
+    data.extend_from_slice(&4u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&(exif_offset as u32).to_le_bytes());
+    if gps {
+        data.extend_from_slice(&0x8825u16.to_le_bytes());
+        data.extend_from_slice(&4u16.to_le_bytes());
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&(gps_offset as u32).to_le_bytes());
+    }
+    data.extend_from_slice(&0u32.to_le_bytes());
+
+    data.extend_from_slice(&(exif_count as u16).to_le_bytes());
+    data.extend_from_slice(&0x829Au16.to_le_bytes());
+    data.extend_from_slice(&5u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&(exposure_offset as u32).to_le_bytes());
+    data.extend_from_slice(&0x829Du16.to_le_bytes());
+    data.extend_from_slice(&5u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&(aperture_offset as u32).to_le_bytes());
+    data.extend_from_slice(&0x8827u16.to_le_bytes());
+    data.extend_from_slice(&3u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&100u32.to_le_bytes());
+    data.extend_from_slice(&0x9003u16.to_le_bytes());
+    data.extend_from_slice(&2u16.to_le_bytes());
+    data.extend_from_slice(&20u32.to_le_bytes());
+    data.extend_from_slice(&(datetime_offset as u32).to_le_bytes());
+    data.extend_from_slice(&0x920Au16.to_le_bytes());
+    data.extend_from_slice(&5u16.to_le_bytes());
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(&(focal_offset as u32).to_le_bytes());
+    data.extend_from_slice(&0u32.to_le_bytes());
+
+    if gps {
+        data.extend_from_slice(&(gps_count as u16).to_le_bytes());
+        data.extend_from_slice(&0x0001u16.to_le_bytes());
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&2u32.to_le_bytes());
+        data.extend_from_slice(&[b'N', 0, 0, 0]);
+        data.extend_from_slice(&0x0002u16.to_le_bytes());
+        data.extend_from_slice(&5u16.to_le_bytes());
+        data.extend_from_slice(&3u32.to_le_bytes());
+        data.extend_from_slice(&(gps_latitude_offset as u32).to_le_bytes());
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&2u32.to_le_bytes());
+        data.extend_from_slice(&[b'E', 0, 0, 0]);
+        data.extend_from_slice(&0x0004u16.to_le_bytes());
+        data.extend_from_slice(&5u16.to_le_bytes());
+        data.extend_from_slice(&3u32.to_le_bytes());
+        data.extend_from_slice(&(gps_longitude_offset as u32).to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    debug_assert_eq!(data.len(), datetime_offset);
+    data.extend_from_slice(&datetime_bytes);
+    for (num, denom) in [(18u32, 10u32), (1, 125), (26, 1)] {
+        data.extend_from_slice(&num.to_le_bytes());
+        data.extend_from_slice(&denom.to_le_bytes());
+    }
+    if gps {
+        for (num, denom) in [(52u32, 1u32), (31, 1), (12, 1)] {
+            data.extend_from_slice(&num.to_le_bytes());
+            data.extend_from_slice(&denom.to_le_bytes());
+        }
+        for (num, denom) in [(13u32, 1u32), (24, 1), (18, 1)] {
+            data.extend_from_slice(&num.to_le_bytes());
+            data.extend_from_slice(&denom.to_le_bytes());
         }
     }
 

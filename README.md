@@ -115,6 +115,7 @@ against the process working directory, not the directory containing the file.
 | `--dry-run` | off | Scan and report planned work; write nothing. |
 | `--quiet` | off | Suppress progress reporting on stderr. |
 | `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
+| `--include-location` | off | Publish EXIF/video geocoordinates. Default off keeps location out of output. |
 | `--bind <addr>` | `127.0.0.1:8080` | Server listen address; overrides `bind` in TOML. |
 | `--max-streams <n>` | `8` | Server concurrent `/media/` streams; overrides `max_streams` in TOML. |
 | `--config <path>` | `./media-catalog.toml` if present | Shared TOML configuration file. |
@@ -131,13 +132,15 @@ events_file = "./events.toml"
 media_url_prefix = "/media"
 thumb_url_prefix = "/thumbs"
 jobs = 4
+include_location = false
 bind = "127.0.0.1:8080"
 max_streams = 8
 ```
 
 Both binaries accept every key in this schema. The generator ignores `bind` and
 `max_streams`; the server ignores `state_root`, `events_file`, URL prefixes,
-`jobs`, and generator-only flags. Keys outside the schema are rejected.
+`jobs`, `include_location`, and generator-only flags. Keys outside the schema are
+rejected.
 
 URL prefixes are normalized to a leading slash and no trailing slash. Published
 data is written directly under the data root, and build state lives in the state
@@ -463,6 +466,12 @@ Each `catalog/YYYY.json` shard contains ordered item records:
       "width": 4032,
       "height": 3024,
       "duration_ms": null,
+      "f_number": 1.8,
+      "exposure_time": "1/125",
+      "iso": 100,
+      "focal_length_mm": 26.0,
+      "latitude": 52.520008,
+      "longitude": 13.404954,
       "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=...",
       "media_url": "/media/2024/05/a.jpg",
       "thumb_available": true,
@@ -476,9 +485,13 @@ Event fields are additive: `events` is omitted from the index and from every ite
 when no events are configured, and an event's `sections` array is omitted when it
 has no sections. Older catalogs without the fields load as having no events or
 sections. Item event slugs are sorted independently of the order events appear
-in the events file. The camera model is also optional per item and omitted when
-unknown. `size_bytes` is always written by current builds; catalogs published
-before it existed still load, and their items show no size in the viewer.
+in the events file. The camera model, camera settings (`f_number`,
+`exposure_time`, `iso`, `focal_length_mm`), and file size are optional per item
+and omitted when unknown. `latitude` and `longitude` are written only when
+`--include-location` (or `include_location = true`) is enabled; with the default
+off, location fields never appear in JSON or HTML. `size_bytes` is always written
+by current builds; catalogs published before it existed still load, and their
+items show no size in the viewer.
 Sections publish resolved `start`/`end` ranges rather than bookmark timestamps,
 so the server does not depend on the generator's bookmark derivation rule.
 
@@ -506,6 +519,11 @@ link behavior.
   and the original's file size in decimal units, for example
   `2024-05-01 10:11:12 · iPhone 15 Pro · 3.4 MB`. The filename is not shown;
   items from catalogs published before file sizes were recorded show no size.
+- **Camera settings:** a second line shows aperture, exposure time, ISO, and focal
+  length when known, such as `26 mm · f/1.8 · 1/125 s · ISO 100`. Unknown values
+  are omitted. When the catalog was built with `--include-location`, the
+  coordinates appear with a link that opens the point on OpenStreetMap in a new
+  tab; no map request happens until the link is activated.
 - **Navigation:** use the Previous/Next controls, the Left/Right arrow keys, or a
   horizontal swipe while an image is at fit scale. Arrow keys keep navigating
   while an image is zoomed.

@@ -413,6 +413,114 @@ fn heic_is_unavailable_and_metadata_is_private() {
 }
 
 #[test]
+fn camera_metadata_is_published_and_location_is_opt_in() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/photo.jpg",
+        Some(1),
+        Some("2024:05:01 10:11:12"),
+        true,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/05/phone.heic",
+        Some(1),
+        Some("2024:05:02 10:11:12"),
+        true,
+    );
+
+    let first = run_with_config(fixture.config()).unwrap();
+    assert!(!first.blocked);
+    assert!(
+        first.summary.errors.is_empty(),
+        "{:?}",
+        first.summary.errors
+    );
+    assert_eq!(first.summary.probed, 2);
+    assert_eq!(first.summary.thumbnails_generated, 1);
+    assert_eq!(first.summary.thumbnails_unsupported, 1);
+
+    let shard: Value = serde_json::from_str(&fixture.read_json("catalog/2024.json")).unwrap();
+    let items = shard["items"].as_array().unwrap();
+    let photo = items
+        .iter()
+        .find(|item| item["path"] == "2024/05/photo.jpg")
+        .unwrap();
+    assert_eq!(photo["f_number"], 1.8);
+    assert_eq!(photo["exposure_time"], "1/125");
+    assert_eq!(photo["iso"], 100);
+    assert_eq!(photo["focal_length_mm"], 26.0);
+    assert!(photo.get("latitude").is_none());
+    assert!(photo.get("longitude").is_none());
+
+    let heic = items
+        .iter()
+        .find(|item| item["path"] == "2024/05/phone.heic")
+        .unwrap();
+    assert_eq!(heic["thumb_available"], false);
+    assert_eq!(heic["captured_at"], "2024-05-02 10:11:12");
+    assert_eq!(heic["iso"], 100);
+    assert!(heic.get("latitude").is_none());
+
+    let html = rendered_month(&fixture, 2024, 5);
+    assert!(html.contains("data-f-number=\"1.8\""));
+    assert!(html.contains("data-exposure=\"1/125\""));
+    assert!(html.contains("data-iso=\"100\""));
+    assert!(html.contains("data-focal=\"26\""));
+    assert!(!html.contains("data-lat="));
+
+    let mut config = fixture.config();
+    config.include_location = true;
+    let second = run_with_config(config).unwrap();
+    assert!(
+        second.summary.errors.is_empty(),
+        "{:?}",
+        second.summary.errors
+    );
+    assert_eq!(second.summary.probed, 0);
+
+    let shard: Value = serde_json::from_str(&fixture.read_json("catalog/2024.json")).unwrap();
+    let items = shard["items"].as_array().unwrap();
+    let photo = items
+        .iter()
+        .find(|item| item["path"] == "2024/05/photo.jpg")
+        .unwrap();
+    assert_eq!(photo["latitude"], 52.52);
+    assert_eq!(photo["longitude"], 13.405);
+
+    let html = rendered_month(&fixture, 2024, 5);
+    assert!(html.contains("data-lat=\"52.52\""));
+    assert!(html.contains("data-lon=\"13.405\""));
+}
+
+#[test]
+fn video_location_is_published_when_enabled() {
+    let fixture = Fixture::new();
+    if !fixture.write_video_with_location("2024/05/clip.mp4", 1, "+52.5200+013.4050/") {
+        eprintln!("skipping video location test: ffmpeg unavailable");
+        return;
+    }
+
+    let mut config = fixture.config();
+    config.include_location = true;
+    let outcome = run_with_config(config).unwrap();
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+
+    let shard: Value = serde_json::from_str(&fixture.read_json("catalog/2024.json")).unwrap();
+    let video = shard["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["path"] == "2024/05/clip.mp4")
+        .unwrap();
+    assert_eq!(video["latitude"], 52.52);
+    assert_eq!(video["longitude"], 13.405);
+}
+
+#[test]
 fn video_items_receive_posters_and_duration() {
     let fixture = Fixture::new();
     fixture.write_image("2024/05/photo.jpg", 20, 20, 1);

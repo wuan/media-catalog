@@ -5,9 +5,10 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
+use crate::probe::{Exposure, ProbeResult};
 use crate::scan::{MediaKind, ScannedFile};
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Thumbnail lifecycle state stored per item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,12 @@ pub struct ItemRecord {
     pub duration_ms: Option<u64>,
     pub captured_at: Option<String>,
     pub model: Option<String>,
+    pub f_number: Option<f32>,
+    pub exposure: Option<Exposure>,
+    pub iso: Option<u32>,
+    pub focal_length_mm: Option<f32>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub thumb_path: Option<String>,
     pub thumb_version: Option<String>,
     pub thumb_status: ThumbStatus,
@@ -110,13 +117,16 @@ impl StateDb {
     pub fn load_items(&self) -> Result<HashMap<String, ItemRecord>> {
         let mut statement = self.conn.prepare(
             "SELECT path, year, month, kind, size, mtime, fingerprint, width, height,
-                    duration_ms, captured_at, model, thumb_path, thumb_version, thumb_status,
-                    error, last_seen_run
+                    duration_ms, captured_at, model, f_number, iso, focal_length_mm,
+                    exposure_num, exposure_den, latitude, longitude,
+                    thumb_path, thumb_version, thumb_status, error, last_seen_run
              FROM items",
         )?;
         let rows = statement.query_map([], |row| {
             let kind_text: String = row.get(3)?;
-            let thumb_status_text: String = row.get(14)?;
+            let thumb_status_text: String = row.get(21)?;
+            let exposure_num: Option<u32> = row.get(15)?;
+            let exposure_den: Option<u32> = row.get(16)?;
             Ok(ItemRecord {
                 path: row.get(0)?,
                 year: row.get(1)?,
@@ -130,12 +140,20 @@ impl StateDb {
                 duration_ms: row.get::<_, Option<i64>>(9)?.map(|value| value as u64),
                 captured_at: row.get(10)?,
                 model: row.get(11)?,
-                thumb_path: row.get(12)?,
-                thumb_version: row.get(13)?,
+                f_number: row.get(12)?,
+                iso: row.get(13)?,
+                focal_length_mm: row.get(14)?,
+                exposure: exposure_num
+                    .zip(exposure_den)
+                    .and_then(|(numerator, denominator)| Exposure::new(numerator, denominator)),
+                latitude: row.get(17)?,
+                longitude: row.get(18)?,
+                thumb_path: row.get(19)?,
+                thumb_version: row.get(20)?,
                 thumb_status: ThumbStatus::parse(&thumb_status_text)
                     .unwrap_or(ThumbStatus::Pending),
-                error: row.get(15)?,
-                last_seen_run: row.get(16)?,
+                error: row.get(22)?,
+                last_seen_run: row.get(23)?,
             })
         })?;
 
@@ -174,6 +192,20 @@ impl StateDb {
                                        THEN items.captured_at ELSE NULL END,
                     model = CASE WHEN items.fingerprint = excluded.fingerprint
                                  THEN items.model ELSE NULL END,
+                    f_number = CASE WHEN items.fingerprint = excluded.fingerprint
+                                    THEN items.f_number ELSE NULL END,
+                    iso = CASE WHEN items.fingerprint = excluded.fingerprint
+                               THEN items.iso ELSE NULL END,
+                    focal_length_mm = CASE WHEN items.fingerprint = excluded.fingerprint
+                                           THEN items.focal_length_mm ELSE NULL END,
+                    exposure_num = CASE WHEN items.fingerprint = excluded.fingerprint
+                                        THEN items.exposure_num ELSE NULL END,
+                    exposure_den = CASE WHEN items.fingerprint = excluded.fingerprint
+                                        THEN items.exposure_den ELSE NULL END,
+                    latitude = CASE WHEN items.fingerprint = excluded.fingerprint
+                                    THEN items.latitude ELSE NULL END,
+                    longitude = CASE WHEN items.fingerprint = excluded.fingerprint
+                                     THEN items.longitude ELSE NULL END,
                     thumb_path = CASE WHEN items.fingerprint = excluded.fingerprint
                                       THEN items.thumb_path ELSE NULL END,
                     thumb_version = CASE WHEN items.fingerprint = excluded.fingerprint
@@ -200,26 +232,27 @@ impl StateDb {
         Ok(())
     }
 
-    pub fn set_probe(
-        &self,
-        path: &str,
-        width: Option<u32>,
-        height: Option<u32>,
-        duration_ms: Option<u64>,
-        captured_at: Option<&str>,
-        model: Option<&str>,
-    ) -> Result<()> {
+    pub fn set_probe(&self, path: &str, probe: &ProbeResult) -> Result<()> {
+        let exposure = probe.exposure;
         self.conn.execute(
             "UPDATE items SET width = ?2, height = ?3, duration_ms = ?4, captured_at = ?5,
-                    model = ?6
+                    model = ?6, f_number = ?7, exposure_num = ?8, exposure_den = ?9,
+                    iso = ?10, focal_length_mm = ?11, latitude = ?12, longitude = ?13
              WHERE path = ?1",
             params![
                 path,
-                width,
-                height,
-                duration_ms.map(|value| value as i64),
-                captured_at,
-                model
+                probe.width,
+                probe.height,
+                probe.duration_ms.map(|value| value as i64),
+                probe.captured_at.as_deref(),
+                probe.model.as_deref(),
+                probe.f_number,
+                exposure.map(|value| value.numerator),
+                exposure.map(|value| value.denominator),
+                probe.iso,
+                probe.focal_length_mm,
+                probe.latitude,
+                probe.longitude
             ],
         )?;
         Ok(())
@@ -347,6 +380,13 @@ fn init_schema(conn: &Connection) -> Result<()> {
             duration_ms   INTEGER,
             captured_at   TEXT,
             model         TEXT,
+            f_number      REAL,
+            exposure_num  INTEGER,
+            exposure_den  INTEGER,
+            iso           INTEGER,
+            focal_length_mm REAL,
+            latitude      REAL,
+            longitude     REAL,
             thumb_path    TEXT,
             thumb_version TEXT,
             thumb_status  TEXT NOT NULL,
@@ -388,7 +428,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
             )?;
         }
         Some(version) if version == SCHEMA_VERSION.to_string() => {}
-        Some(version) if version == "1" => migrate_v1_to_v2(conn)?,
+        Some(version) if version == "1" => {
+            migrate_v1_to_v2(conn)?;
+            migrate_v2_to_v3(conn)?;
+        }
+        Some(version) if version == "2" => migrate_v2_to_v3(conn)?,
         Some(version) => bail!(
             "state database schema version {version} is unsupported (expected {SCHEMA_VERSION})"
         ),
@@ -404,6 +448,38 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
     conn.execute(
         "UPDATE items SET width = NULL, height = NULL, duration_ms = NULL,
                 captured_at = NULL, model = NULL",
+        [],
+    )
+    .context("clearing cached probe metadata during state migration")?;
+    conn.execute(
+        "UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+        [],
+    )
+    .context("updating state schema version")?;
+    Ok(())
+}
+
+/// Upgrade a schema-version-2 database with camera settings and coordinates.
+/// Cached probe fields are cleared once so unchanged items are probed again,
+/// while thumbnail columns are preserved.
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    for statement in [
+        "ALTER TABLE items ADD COLUMN f_number REAL",
+        "ALTER TABLE items ADD COLUMN exposure_num INTEGER",
+        "ALTER TABLE items ADD COLUMN exposure_den INTEGER",
+        "ALTER TABLE items ADD COLUMN iso INTEGER",
+        "ALTER TABLE items ADD COLUMN focal_length_mm REAL",
+        "ALTER TABLE items ADD COLUMN latitude REAL",
+        "ALTER TABLE items ADD COLUMN longitude REAL",
+    ] {
+        conn.execute(statement, [])
+            .with_context(|| format!("migrating state schema: {statement}"))?;
+    }
+    conn.execute(
+        "UPDATE items SET width = NULL, height = NULL, duration_ms = NULL,
+                captured_at = NULL, model = NULL, f_number = NULL, exposure_num = NULL,
+                exposure_den = NULL, iso = NULL, focal_length_mm = NULL, latitude = NULL,
+                longitude = NULL",
         [],
     )
     .context("clearing cached probe metadata during state migration")?;
@@ -458,6 +534,41 @@ mod tests {
     }
 
     #[test]
+    fn stores_and_reloads_camera_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        let mut db = StateDb::open(&path).unwrap();
+        let run = db.start_run("start").unwrap();
+        db.upsert_scanned(&[scanned("2024/05/a.jpg", "10:20")], run)
+            .unwrap();
+        db.set_probe(
+            "2024/05/a.jpg",
+            &ProbeResult {
+                width: Some(4032),
+                height: Some(3024),
+                captured_at: Some("2024-05-01 10:00:00".to_string()),
+                model: Some("iPhone 15 Pro".to_string()),
+                f_number: Some(1.8),
+                exposure: Exposure::new(1, 125),
+                iso: Some(100),
+                focal_length_mm: Some(26.0),
+                latitude: Some(52.520008),
+                longitude: Some(13.404954),
+                ..ProbeResult::default()
+            },
+        )
+        .unwrap();
+
+        let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+        assert_eq!(item.f_number, Some(1.8));
+        assert_eq!(item.exposure, Exposure::new(1, 125));
+        assert_eq!(item.iso, Some(100));
+        assert_eq!(item.focal_length_mm, Some(26.0));
+        assert_eq!(item.latitude, Some(52.520008));
+        assert_eq!(item.longitude, Some(13.404954));
+    }
+
+    #[test]
     fn changed_fingerprint_resets_derived_state() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("state.sqlite");
@@ -467,11 +578,13 @@ mod tests {
             .unwrap();
         db.set_probe(
             "2024/05/a.jpg",
-            Some(100),
-            Some(80),
-            None,
-            Some("2024-05-01 10:00:00"),
-            Some("Test Camera"),
+            &ProbeResult {
+                width: Some(100),
+                height: Some(80),
+                captured_at: Some("2024-05-01 10:00:00".to_string()),
+                model: Some("Test Camera".to_string()),
+                ..ProbeResult::default()
+            },
         )
         .unwrap();
         db.set_thumb(
@@ -503,11 +616,13 @@ mod tests {
             .unwrap();
         db.set_probe(
             "2024/05/a.jpg",
-            Some(100),
-            Some(80),
-            None,
-            Some("2024-05-01 10:00:00"),
-            Some("iPhone 15 Pro"),
+            &ProbeResult {
+                width: Some(100),
+                height: Some(80),
+                captured_at: Some("2024-05-01 10:00:00".to_string()),
+                model: Some("iPhone 15 Pro".to_string()),
+                ..ProbeResult::default()
+            },
         )
         .unwrap();
 
@@ -571,6 +686,12 @@ mod tests {
         assert!(item.height.is_none());
         assert!(item.captured_at.is_none());
         assert!(item.model.is_none());
+        assert!(item.f_number.is_none());
+        assert!(item.exposure.is_none());
+        assert!(item.iso.is_none());
+        assert!(item.focal_length_mm.is_none());
+        assert!(item.latitude.is_none());
+        assert!(item.longitude.is_none());
         assert_eq!(item.thumb_status, ThumbStatus::Ok);
         assert_eq!(item.thumb_version.as_deref(), Some("a-14"));
 
@@ -582,16 +703,18 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "2");
+        assert_eq!(version, "3");
 
         // Reopening an already migrated database must not clear cached metadata again.
         db.set_probe(
             "2024/05/a.jpg",
-            Some(100),
-            Some(80),
-            None,
-            Some("2024-05-01 10:00:00"),
-            Some("iPhone 15 Pro"),
+            &ProbeResult {
+                width: Some(100),
+                height: Some(80),
+                captured_at: Some("2024-05-01 10:00:00".to_string()),
+                model: Some("iPhone 15 Pro".to_string()),
+                ..ProbeResult::default()
+            },
         )
         .unwrap();
         drop(db);
@@ -599,6 +722,82 @@ mod tests {
         let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
         assert_eq!(item.width, Some(100));
         assert_eq!(item.model.as_deref(), Some("iPhone 15 Pro"));
+    }
+
+    fn v2_database(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE items (
+                path          TEXT PRIMARY KEY,
+                year          INTEGER NOT NULL,
+                month         INTEGER NOT NULL,
+                kind          TEXT NOT NULL,
+                size          INTEGER NOT NULL,
+                mtime         INTEGER NOT NULL,
+                fingerprint   TEXT NOT NULL,
+                width         INTEGER,
+                height        INTEGER,
+                duration_ms   INTEGER,
+                captured_at   TEXT,
+                model         TEXT,
+                thumb_path    TEXT,
+                thumb_version TEXT,
+                thumb_status  TEXT NOT NULL,
+                error         TEXT,
+                last_seen_run INTEGER NOT NULL
+            );
+            CREATE INDEX items_month ON items(year, month);
+            CREATE TABLE runs (
+                id          INTEGER PRIMARY KEY,
+                started_at  TEXT,
+                finished_at TEXT,
+                status      TEXT,
+                item_count  INTEGER,
+                error_count INTEGER
+            );
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '2');
+            INSERT INTO items
+                (path, year, month, kind, size, mtime, fingerprint, width, height,
+                 duration_ms, captured_at, model, thumb_path, thumb_version, thumb_status,
+                 error, last_seen_run)
+            VALUES
+                ('2024/05/a.jpg', 2024, 5, 'image', 10, 20, '10:20', 100, 80,
+                 NULL, '2024-05-01 10:00:00', 'Test Camera',
+                 'thumbs/2024/05/a.jpg.webp', 'a-14', 'ok', NULL, 1);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migrates_v2_state_and_preserves_thumbnails() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        v2_database(&path);
+
+        let db = StateDb::open(&path).unwrap();
+        let item = db.load_items().unwrap().remove("2024/05/a.jpg").unwrap();
+        assert!(item.width.is_none());
+        assert!(item.captured_at.is_none());
+        assert!(item.model.is_none());
+        assert!(item.f_number.is_none());
+        assert!(item.exposure.is_none());
+        assert!(item.iso.is_none());
+        assert!(item.focal_length_mm.is_none());
+        assert!(item.latitude.is_none());
+        assert!(item.longitude.is_none());
+        assert_eq!(item.thumb_status, ThumbStatus::Ok);
+        assert_eq!(item.thumb_version.as_deref(), Some("a-14"));
+
+        let conn = Connection::open(&path).unwrap();
+        let version: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, "3");
     }
 
     #[test]

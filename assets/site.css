@@ -503,6 +503,27 @@ footer {
   font-size: 0.85rem;
 }
 
+.viewer-meta {
+  margin: 0.2rem 0 0;
+  color: #e7e2da;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.viewer-location {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+.viewer-location a {
+  color: #b9d7ff;
+}
+
+.viewer-location a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .viewer-error {
   margin: 0.4rem 0 0;
   color: #ffd7a8;

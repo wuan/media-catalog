@@ -8,7 +8,13 @@
       {% if let Some(size) = item.size %}data-size="{{ size }}"{% endif %}
       {% if item.thumb_available %}data-thumb-url="{{ item.thumb_url }}"{% endif %}
       {% if let Some(width) = item.width %}data-width="{{ width }}"{% endif %}
-      {% if let Some(height) = item.height %}data-height="{{ height }}"{% endif %}>
+      {% if let Some(height) = item.height %}data-height="{{ height }}"{% endif %}
+      {%- if let Some(f_number) = item.f_number %} data-f-number="{{ f_number }}"{%- endif %}
+      {%- if let Some(exposure) = item.exposure %} data-exposure="{{ exposure }}"{%- endif %}
+      {%- if let Some(iso) = item.iso %} data-iso="{{ iso }}"{%- endif %}
+      {%- if let Some(focal) = item.focal_length_mm %} data-focal="{{ focal }}"{%- endif %}
+      {%- if let Some(latitude) = item.latitude %} data-lat="{{ latitude }}"{%- endif %}
+      {%- if let Some(longitude) = item.longitude %} data-lon="{{ longitude }}"{%- endif %}>
       {% if item.thumb_available %}
       <img src="{{ item.thumb_url }}" alt="{{ item.alt }}" loading="lazy" decoding="async">
       {% else %}

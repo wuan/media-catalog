@@ -13,6 +13,7 @@ axum = "0.8"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
+kamadak-exif = "0.6"
 futures-core = "0.3"
 httpdate = "1"
 image = "0.25"

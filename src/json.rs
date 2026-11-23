@@ -11,6 +11,7 @@ use crate::model::{
     MonthView, SectionView, YearView,
 };
 use crate::paths::item_name;
+use crate::probe::Exposure;
 use crate::scan::MediaKind;
 
 pub const JSON_SCHEMA_VERSION: u32 = 2;
@@ -147,6 +148,19 @@ pub struct ShardItem {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub f_number: Option<f32>,
+    /// Reduced exposure fraction such as `1/125`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure_time: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iso: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focal_length_mm: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
     pub thumb_url: Option<String>,
     pub media_url: String,
     pub thumb_available: bool,
@@ -167,6 +181,12 @@ impl From<&ItemView> for ShardItem {
             width: item.width,
             height: item.height,
             duration_ms: item.duration_ms,
+            f_number: item.f_number,
+            exposure_time: item.exposure.map(|exposure| exposure.fraction()),
+            iso: item.iso,
+            focal_length_mm: item.focal_length_mm,
+            latitude: item.latitude,
+            longitude: item.longitude,
             thumb_url: item.thumb_url.clone(),
             media_url: item.media_url.clone(),
             thumb_available: item.thumb_available,
@@ -189,6 +209,12 @@ impl ShardItem {
             width: self.width,
             height: self.height,
             duration_ms: self.duration_ms,
+            f_number: self.f_number,
+            exposure: self.exposure_time.as_deref().and_then(Exposure::parse),
+            iso: self.iso,
+            focal_length_mm: self.focal_length_mm,
+            latitude: self.latitude,
+            longitude: self.longitude,
             thumb_url: self.thumb_url.clone(),
             media_url: self.media_url.clone(),
             thumb_available: self.thumb_available,
@@ -508,6 +534,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("10-20".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
                 CatalogItemInput {
                     rel_path: "2024/05/clip.mp4".into(),
@@ -523,6 +550,7 @@ mod tests {
                     duration_ms: Some(12_500),
                     thumb_version: Some("30-40".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
                 CatalogItemInput {
                     rel_path: "2024/05/broken.heic".into(),
@@ -538,6 +566,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: None,
                     thumb_available: false,
+                    ..CatalogItemInput::default()
                 },
             ],
             "/media",
@@ -609,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn no_private_metadata_fields_are_serialized() {
+    fn location_fields_are_absent_when_not_published() {
         let output = render_json(&catalog()).unwrap();
         let all = format!(
             "{}{}",
@@ -618,6 +647,59 @@ mod tests {
         );
         for forbidden in ["gps", "location", "latitude", "longitude", "serial"] {
             assert!(!all.to_ascii_lowercase().contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn publishes_camera_settings_and_coordinates() {
+        let mut item = CatalogItemInput {
+            rel_path: "2024/05/a.jpg".into(),
+            year: 2024,
+            month: 5,
+            kind: MediaKind::Image,
+            captured_at: Some("2024-05-01 10:00:00".into()),
+            f_number: Some(1.8),
+            exposure: crate::probe::Exposure::new(1, 125),
+            iso: Some(100),
+            focal_length_mm: Some(26.0),
+            latitude: Some(52.520008),
+            longitude: Some(13.404954),
+            ..CatalogItemInput::default()
+        };
+        item.size = 3_400_000;
+        let catalog = build_catalog(vec![item], "/media", "/thumbs");
+        let output = render_json(&catalog).unwrap();
+        let shard = &output.shards[&2024];
+        assert!(shard.contains("\"f_number\": 1.8"));
+        assert!(shard.contains("\"exposure_time\": \"1/125\""));
+        assert!(shard.contains("\"iso\": 100"));
+        assert!(shard.contains("\"focal_length_mm\": 26.0"));
+        assert!(shard.contains("\"latitude\": 52.520008"));
+        assert!(shard.contains("\"longitude\": 13.404954"));
+
+        let parsed = catalog_from_json(&output.index, &output.shards).unwrap();
+        let parsed_item = &parsed.years[0].months[0].items[0];
+        assert_eq!(parsed_item.f_number, Some(1.8));
+        assert_eq!(parsed_item.exposure, crate::probe::Exposure::new(1, 125));
+        assert_eq!(parsed_item.iso, Some(100));
+        assert_eq!(parsed_item.focal_length_mm, Some(26.0));
+        assert_eq!(parsed_item.latitude, Some(52.520008));
+        assert_eq!(parsed_item.longitude, Some(13.404954));
+    }
+
+    #[test]
+    fn omits_unknown_camera_settings_and_location() {
+        let output = render_json(&catalog()).unwrap();
+        let all = output.shards.values().cloned().collect::<String>();
+        for absent in [
+            "\"f_number\"",
+            "\"exposure_time\"",
+            "\"iso\"",
+            "\"focal_length_mm\"",
+            "\"latitude\"",
+            "\"longitude\"",
+        ] {
+            assert!(!all.contains(absent), "unexpected {absent}");
         }
     }
 
@@ -645,6 +727,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("10-20".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
                 CatalogItemInput {
                     rel_path: "2024/06/b.jpg".into(),
@@ -660,6 +743,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("11-21".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
                 CatalogItemInput {
                     rel_path: "2024/06/outside.jpg".into(),
@@ -675,6 +759,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("12-22".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
             ],
             "/media",
@@ -748,6 +833,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("10-20".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
                 CatalogItemInput {
                     rel_path: "2024/05/algarve.jpg".into(),
@@ -763,6 +849,7 @@ mod tests {
                     duration_ms: None,
                     thumb_version: Some("11-21".into()),
                     thumb_available: true,
+                    ..CatalogItemInput::default()
                 },
             ],
             "/media",

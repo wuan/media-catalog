@@ -23,7 +23,13 @@ const fakeTile = {
       "data-captured": "2024-05-01 10:00:00",
       "data-thumb-url": "/thumbs/2024/05/a.jpg.webp?v=1",
       "data-width": "4000",
-      "data-height": "3000"
+      "data-height": "3000",
+      "data-f-number": "1.8",
+      "data-exposure": "1/125",
+      "data-iso": "100",
+      "data-focal": "26",
+      "data-lat": "52.520008",
+      "data-lon": "13.404954"
     }[name] || null;
   },
   querySelector(selector) {
@@ -33,6 +39,14 @@ const fakeTile = {
 const tile = api.tileFromElement(fakeTile);
 const bareTile = api.tileFromElement({
   getAttribute: fakeTile.getAttribute,
+  querySelector() {
+    return null;
+  }
+});
+const noMetadataTile = api.tileFromElement({
+  getAttribute() {
+    return null;
+  },
   querySelector() {
     return null;
   }
@@ -97,6 +111,24 @@ const result = {
   sizeMegabytes: api.formatFileSize(3400000),
   sizeGigabytes: api.formatFileSize(1240000000),
   sizeUnknown: api.formatFileSize(null),
+  tileFNumber: tile.fNumber,
+  tileExposure: tile.exposure,
+  tileIso: tile.iso,
+  tileFocal: tile.focal,
+  tileLatitude: tile.latitude,
+  tileLongitude: tile.longitude,
+  metadataFull: api.metadataText(tile),
+  metadataPartial: api.metadataText({ iso: 100 }),
+  metadataEmpty: api.metadataText({}),
+  exposureFraction: api.formatExposure("1/125"),
+  exposureSeconds: api.formatExposure("4/1"),
+  exposureDecimal: api.formatExposure("3/2"),
+  exposureInvalid: api.formatExposure("not-a-number"),
+  coordinates: api.formatCoordinates(52.520008, 13.404954),
+  locationUrl: api.locationUrl(52.520008, 13.404954),
+  locationLabel: api.locationLabel(52.520008, 13.404954),
+  hasLocation: api.hasLocation(tile),
+  noLocation: api.hasLocation(noMetadataTile),
   tileAlt: tile.alt,
   tileWidth: tile.width,
   tileHeight: tile.height,

@@ -92,6 +92,30 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["sizeMegabytes"], "3.4 MB");
     assert_eq!(result["sizeGigabytes"], "1.2 GB");
     assert_eq!(result["sizeUnknown"], "");
+    assert_eq!(result["tileFNumber"], 1.8);
+    assert_eq!(result["tileExposure"], "1/125");
+    assert_eq!(result["tileIso"], 100.0);
+    assert_eq!(result["tileFocal"], 26.0);
+    assert_eq!(result["tileLatitude"], 52.520008);
+    assert_eq!(result["tileLongitude"], 13.404954);
+    assert_eq!(result["metadataFull"], "26 mm · f/1.8 · 1/125 s · ISO 100");
+    assert_eq!(result["metadataPartial"], "ISO 100");
+    assert_eq!(result["metadataEmpty"], "");
+    assert_eq!(result["exposureFraction"], "1/125 s");
+    assert_eq!(result["exposureSeconds"], "4 s");
+    assert_eq!(result["exposureDecimal"], "1.5 s");
+    assert_eq!(result["exposureInvalid"], "");
+    assert_eq!(result["coordinates"], "52.5200, 13.4050");
+    assert_eq!(
+        result["locationUrl"],
+        "https://www.openstreetmap.org/?mlat=52.520008&mlon=13.404954#map=16/52.520008/13.404954"
+    );
+    assert_eq!(
+        result["locationLabel"],
+        "Open location 52.5200, 13.4050 on OpenStreetMap (opens in a new tab)"
+    );
+    assert_eq!(result["hasLocation"], true);
+    assert_eq!(result["noLocation"], false);
     assert_eq!(result["tileAlt"], "a.jpg");
     assert_eq!(result["tileWidth"], 4000.0);
     assert_eq!(result["tileHeight"], 3000.0);

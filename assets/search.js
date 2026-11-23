@@ -88,6 +88,27 @@
     return model ? short + " " + model : short;
   }
 
+  function metadataAttributes(item) {
+    var attributes = {};
+    if (typeof item.f_number === "number") {
+      attributes["data-f-number"] = String(item.f_number);
+    }
+    if (typeof item.exposure_time === "string" && item.exposure_time) {
+      attributes["data-exposure"] = item.exposure_time;
+    }
+    if (typeof item.iso === "number") {
+      attributes["data-iso"] = String(item.iso);
+    }
+    if (typeof item.focal_length_mm === "number") {
+      attributes["data-focal"] = String(item.focal_length_mm);
+    }
+    if (typeof item.latitude === "number" && typeof item.longitude === "number") {
+      attributes["data-lat"] = String(item.latitude);
+      attributes["data-lon"] = String(item.longitude);
+    }
+    return attributes;
+  }
+
   function buildTile(item) {
     var figure = document.createElement("figure");
     figure.className = "tile";
@@ -110,6 +131,10 @@
     if (typeof item.height === "number") {
       link.dataset.height = String(item.height);
     }
+    var metadata = metadataAttributes(item);
+    Object.keys(metadata).forEach(function (name) {
+      link.setAttribute(name, metadata[name]);
+    });
 
     var name = item.path.split("/").pop();
     var alt = name || ("Media item captured " + (item.captured_at || ""));
@@ -278,6 +303,7 @@
     formatDuration: formatDuration,
     formatCaptured: formatCaptured,
     captionText: captionText,
+    metadataAttributes: metadataAttributes,
     filtersFromParams: filtersFromParams,
     filtersToQuery: filtersToQuery
   };

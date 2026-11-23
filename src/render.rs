@@ -117,6 +117,12 @@ struct TileView {
     size: Option<u64>,
     width: Option<u32>,
     height: Option<u32>,
+    f_number: Option<f32>,
+    exposure: Option<String>,
+    iso: Option<u32>,
+    focal_length_mm: Option<f32>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
 }
 
 #[derive(Template)]
@@ -320,6 +326,12 @@ fn tile_from_item(item: &ItemView) -> TileView {
         size: item.size,
         width: item.width,
         height: item.height,
+        f_number: item.f_number,
+        exposure: item.exposure.map(|exposure| exposure.fraction()),
+        iso: item.iso,
+        focal_length_mm: item.focal_length_mm,
+        latitude: item.latitude,
+        longitude: item.longitude,
     }
 }
 
@@ -363,6 +375,7 @@ mod tests {
             duration_ms: None,
             thumb_version: Some("10-20".to_string()),
             thumb_available: true,
+            ..CatalogItemInput::default()
         }
     }
 
@@ -713,6 +726,15 @@ mod tests {
                     ..item("2024/05/clip.mp4", 2024, 5, "2024-05-01 10:00:00")
                 },
                 item("2024/05/a.jpg", 2024, 5, "2024-05-02 10:00:00"),
+                CatalogItemInput {
+                    f_number: Some(1.8),
+                    exposure: crate::probe::Exposure::new(1, 125),
+                    iso: Some(100),
+                    focal_length_mm: Some(26.0),
+                    latitude: Some(52.520008),
+                    longitude: Some(13.404954),
+                    ..item("2024/05/tagged.jpg", 2024, 5, "2024-05-03 10:00:00")
+                },
             ],
             vec![event_meta(
                 "trip",
@@ -729,6 +751,13 @@ mod tests {
         assert!(month.contains("data-thumb-url=\"/thumbs/2024/05/a.jpg.webp?v=10-20\""));
         assert!(month.contains("data-width=\"4000\""));
         assert!(month.contains("data-height=\"3000\""));
+        assert!(month.contains("data-f-number=\"1.8\""));
+        assert!(month.contains("data-exposure=\"1/125\""));
+        assert!(month.contains("data-iso=\"100\""));
+        assert!(month.contains("data-focal=\"26\""));
+        assert!(month.contains("data-lat=\"52.520008\""));
+        assert!(month.contains("data-lon=\"13.404954\""));
+        assert_eq!(month.matches("data-f-number=").count(), 1);
         assert!(month.contains("data-item-path=\"2024/05/clip.mp4\""));
         assert!(month.contains("data-kind=\"video\""));
 
@@ -736,6 +765,8 @@ mod tests {
         assert!(event.contains("data-item-path=\"2024/05/clip.mp4\""));
         assert!(event.contains("data-kind=\"video\""));
         assert!(event.contains("data-width=\"4000\""));
+        assert!(event.contains("data-f-number=\"1.8\""));
+        assert!(event.contains("data-lat=\"52.520008\""));
     }
 
     #[test]

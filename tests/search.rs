@@ -64,6 +64,17 @@ fn search_filters_narrow_the_loaded_shards() {
     assert_eq!(result["captionWithModel"], "24-05-01 10:00 iPhone 15 Pro");
     assert_eq!(result["captionWithoutModel"], "24-05-01 10:00");
     assert_eq!(result["captionEmptyModel"], "24-05-01 10:00");
+    assert_eq!(result["metadataPresent"]["data-f-number"], "1.8");
+    assert_eq!(result["metadataPresent"]["data-exposure"], "1/125");
+    assert_eq!(result["metadataPresent"]["data-iso"], "100");
+    assert_eq!(result["metadataPresent"]["data-focal"], "26");
+    assert_eq!(result["metadataPresent"]["data-lat"], "52.520008");
+    assert_eq!(result["metadataPresent"]["data-lon"], "13.404954");
+    assert_eq!(result["metadataAbsent"], serde_json::json!({}));
+    assert_eq!(
+        result["metadataWithoutLocation"],
+        serde_json::json!({"data-iso": "100"})
+    );
     assert_eq!(result["query"], "q=gamma&kind=video&year=2023&month=12");
 }
 

@@ -25,8 +25,9 @@ target/release/media-catalog \
 | Incremental | 86 | 0 probed, 0 generated, 86 skipped | 0.3 s | 10 MB |
 
 - Original checksums were identical before and after the build.
-- Generated JSON contained no GPS, latitude, longitude, camera, make, or model
-  fields.
+- Generated JSON contained no GPS, latitude, longitude, make, or serial fields; the
+  camera model and lens settings are published, and coordinates only with
+  `--include-location`.
 - Thumbnail, media, and JSON URLs resolved under `/thumbs/`, `/media/`, and
   `/catalog/` when served by `media-catalog-server`, and the dynamic index, year,
   and month pages rendered from the published JSON (200 responses for pages,
@@ -62,3 +63,27 @@ Elapsed: 15.9 s
 
 304 thumbnails had already been written and recorded before the interruption;
 the rerun generated only the remaining 2696 and skipped the completed work.
+
+## Camera metadata and location
+
+Measured with a synthetic 5,000-item tree of identical 64x48 JPEGs carrying
+EXIF aperture f/1.8, exposure 1/125 s, ISO 100, focal length 26 mm, and GPS
+coordinates. Built with the release binary and `--jobs 8`:
+
+| Run | Work | Wall time | Max RSS | Catalog JSON | State DB |
+| --- | --- | --- | --- | --- | --- |
+| Initial, location off | 5,000 probed and thumbnailed | 25.1 s | 84 MB | 2.4 MB | 2.0 MB |
+| Same state, location on | 0 probed, 5,000 thumbnails skipped | ~0.1 s | 37 MB | 2.6 MB | 2.0 MB |
+
+- Shard records measure about 499 bytes per item with lens settings and without
+  coordinates. Enabling location publication adds about 52 bytes per item
+  (2,493,006 -> 2,753,006 bytes for 5,000 items).
+- The location toggle republishes from cached state; it does not re-probe.
+- The server reported about 13 MB RSS after loading the 5,000-item catalog and
+  rendering a month page.
+
+For a 75k-item archive, the per-item measurements extrapolate to roughly 37 MB
+of shard JSON with lens settings and about 4 MB more when coordinates are
+published. Path and thumbnail URL length dominate the per-item size, so a
+deeper tree will exceed these figures. Thumbnail bytes and decode memory still
+dominate the generator's peak RSS, as in the measurements above.
