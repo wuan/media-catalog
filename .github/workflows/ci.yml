@@ -22,7 +22,7 @@ jobs:
     name: Rust build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.100.0
@@ -43,7 +43,7 @@ jobs:
     name: Rust test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.100.0
@@ -52,7 +52,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Node.js for the JavaScript harness
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -70,7 +70,7 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.100.0
@@ -84,7 +84,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install Node.js for the JavaScript harness
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -100,7 +100,7 @@ jobs:
         run: cargo llvm-cov report
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: lcov.info
@@ -111,7 +111,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.100.0
@@ -128,7 +128,7 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
