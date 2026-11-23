@@ -280,19 +280,19 @@ Catalog tiles SHALL remain regular links to original media so that albums remain
 
 ### Requirement: Caption the open item
 
-The viewer SHALL show a single caption line for the open item containing the capture timestamp, then the camera model when known, then the original's file size when known, SHALL NOT show the filename in the caption, and SHALL use that caption line as the dialog's accessible name.
+The viewer SHALL show the capture caption as the left segment of a single status row for the open item, containing the capture timestamp, then the camera model when known, then the original's file size when known, SHALL NOT show the filename in the caption, and SHALL use that capture segment as the dialog's accessible name.
 
 #### Scenario: Caption content
 - **WHEN** an item opens in the viewer
-- **THEN** the caption shows the capture timestamp followed by the camera model when known and the file size when known, and does not show the filename
+- **THEN** the left segment of the status row shows the capture timestamp followed by the camera model when known and the file size when known, and does not show the filename
 
 #### Scenario: Caption without a model
 - **WHEN** an item without a known camera model opens in the viewer
-- **THEN** the caption shows the capture timestamp followed by the file size when known
+- **THEN** the left segment shows the capture timestamp followed by the file size when known
 
 #### Scenario: Caption without a file size
 - **WHEN** an item opens whose catalog record carries no file size, for example from a catalog published before sizes were recorded
-- **THEN** the caption omits the size and shows the remaining parts unchanged
+- **THEN** the left segment omits the size and shows the remaining parts unchanged
 
 #### Scenario: File size units
 - **WHEN** the caption shows a file size
@@ -332,11 +332,11 @@ The viewer SHALL expose modal semantics, labelled controls, current-position inf
 
 ### Requirement: Show camera settings in the viewer
 
-The viewer SHALL show a metadata line for the open item with aperture, exposure time, ISO, and focal length when known, using fixed units and ` · ` separators, and SHALL omit each unknown value without leaving empty separators.
+The viewer SHALL show the camera settings as the right segment of the single status row for the open item, with aperture, exposure time, ISO, and focal length when known, using fixed units and ` · ` separators, and SHALL omit each unknown value without leaving empty separators.
 
 #### Scenario: Complete settings
 - **WHEN** an item has aperture f/1.8, exposure time 1/125 s, ISO 100, and focal length 26 mm
-- **THEN** the metadata line reads `26 mm · f/1.8 · 1/125 s · ISO 100`
+- **THEN** the right segment reads `26 mm · f/1.8 · 1/125 s · ISO 100`
 
 #### Scenario: Fractional exposure below one second
 - **WHEN** the exposure time is below one second
@@ -356,19 +356,19 @@ The viewer SHALL show a metadata line for the open item with aperture, exposure 
 
 #### Scenario: Partial settings
 - **WHEN** only ISO is known
-- **THEN** the metadata line reads `ISO 100` with no separators for the omitted values
+- **THEN** the right segment reads `ISO 100` with no separators for the omitted values
 
 #### Scenario: No settings
 - **WHEN** an item has no known camera settings
-- **THEN** the viewer shows no metadata line
+- **THEN** the viewer shows no settings segment in the status row
 
 ### Requirement: Link published geocoordinates to OpenStreetMap
 
-The viewer SHALL show a location link for each item whose coordinates are published, SHALL address that location on OpenStreetMap in a new tab, and SHALL make no map request before the visitor activates the link.
+The viewer SHALL show the published coordinates as the centred segment of the single status row, SHALL link them to OpenStreetMap in a new tab, and SHALL make no map request before the visitor activates the link.
 
 #### Scenario: Location link present
 - **WHEN** an item with published coordinates opens
-- **THEN** the viewer shows the coordinates and a link to their OpenStreetMap location
+- **THEN** the centred segment shows the coordinates and links to their OpenStreetMap location
 
 #### Scenario: OpenStreetMap target
 - **WHEN** the visitor activates the location link
@@ -380,7 +380,7 @@ The viewer SHALL show a location link for each item whose coordinates are publis
 
 #### Scenario: No coordinates
 - **WHEN** location publication is disabled or the item has no coordinates
-- **THEN** the viewer shows no location link and requests no map data
+- **THEN** the viewer shows no location segment and requests no map data
 
 #### Scenario: No background map request
 - **WHEN** the viewer displays an item with coordinates
@@ -388,11 +388,11 @@ The viewer SHALL show a location link for each item whose coordinates are publis
 
 ### Requirement: Keep viewer metadata accessible
 
-The viewer SHALL keep the existing caption line as the dialog's accessible name, SHALL expose the camera settings and location text as part of the dialog description, and SHALL give the location link an accessible name that identifies the coordinates, OpenStreetMap, and the new-tab behavior.
+The viewer SHALL keep the capture segment as the dialog's accessible name, SHALL expose the camera settings and location text as part of the dialog description, and SHALL give the location link an accessible name that identifies the coordinates, OpenStreetMap, and the new-tab behavior.
 
 #### Scenario: Accessible name unchanged
 - **WHEN** the viewer opens an item with camera settings
-- **THEN** its accessible name remains the capture timestamp line without the settings or filename
+- **THEN** its accessible name remains the capture caption without the settings or filename
 
 #### Scenario: Settings described
 - **WHEN** an assistive technology reads the dialog description
@@ -403,8 +403,40 @@ The viewer SHALL keep the existing caption line as the dialog's accessible name,
 - **THEN** its accessible name identifies the coordinates, OpenStreetMap, and that it opens in a new tab
 
 #### Scenario: Metadata does not replace the caption
-- **WHEN** the metadata line is shown
-- **THEN** the capture timestamp caption remains visible and unchanged
+- **WHEN** the settings or location segments are shown
+- **THEN** the capture caption remains visible in the status row and unchanged
+
+### Requirement: Present viewer status in one row
+
+The viewer SHALL present the capture caption, published coordinates, and camera settings in one status row in the viewer caption area, with the caption at the left edge, the coordinates centred on the row, and the settings at the right edge. Missing parts SHALL be omitted without moving the remaining parts out of their assigned positions, and the row SHALL wrap or stack on narrow viewports without horizontal scrolling or overlapping text.
+
+#### Scenario: All status parts present
+- **WHEN** an item opens with a capture caption, published coordinates, and known camera settings
+- **THEN** the viewer shows one status row with the caption at the left, the coordinates centred, and the settings at the right
+
+#### Scenario: Coordinates centred relative to the row
+- **WHEN** an item with published coordinates opens
+- **THEN** the centre of the coordinates segment aligns with the centre of the status row, within the row's layout tolerance
+
+#### Scenario: Coordinates absent
+- **WHEN** an item has no published coordinates but has camera settings
+- **THEN** the status row keeps the caption left and the settings right, with no empty centre segment
+
+#### Scenario: Settings absent
+- **WHEN** an item has published coordinates but no camera settings
+- **THEN** the status row keeps the coordinates centred and the caption left, with no empty right segment
+
+#### Scenario: Only caption present
+- **WHEN** an item has neither published coordinates nor camera settings
+- **THEN** the status row shows only the capture caption at the left
+
+#### Scenario: Narrow viewport
+- **WHEN** the viewer is used on a viewport too narrow to fit the status parts side by side
+- **THEN** the parts wrap or stack without overlapping or causing horizontal scrolling, while the caption remains the accessible name
+
+#### Scenario: Replaces stacked status lines
+- **WHEN** any item opens in the viewer
+- **THEN** the status area renders as one row rather than as separate stacked caption, settings, and location lines
 
 ### Requirement: Present viewer controls as icon-only controls
 

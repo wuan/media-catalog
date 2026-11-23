@@ -228,6 +228,103 @@ function assertPreview(label, geometry, item) {
   );
 }
 
+async function readStatusRow(page) {
+  return page.evaluate(() => {
+    const status = document.querySelector(".viewer-status");
+    if (!status) {
+      return null;
+    }
+    const row = status.getBoundingClientRect();
+
+    function describe(selector) {
+      const element = document.querySelector(selector);
+      if (!element) {
+        return null;
+      }
+      const hidden =
+        element.hidden || getComputedStyle(element).display === "none";
+      const rect = element.getBoundingClientRect();
+      return {
+        hidden,
+        text: (element.textContent || "").trim(),
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        centerX: rect.left + rect.width / 2,
+        width: rect.width,
+        height: rect.height
+      };
+    }
+
+    return {
+      row: {
+        left: row.left,
+        right: row.right,
+        top: row.top,
+        bottom: row.bottom,
+        centerX: row.left + row.width / 2,
+        width: row.width,
+        height: row.height
+      },
+      order: Array.from(status.children).map((child) => child.className),
+      caption: describe(".viewer-captured"),
+      location: describe(".viewer-location"),
+      meta: describe(".viewer-meta"),
+      statusText: (status.textContent || "").trim(),
+      overflow: status.scrollWidth - status.clientWidth
+    };
+  });
+}
+
+function visibleSegments(status) {
+  return [status.caption, status.location, status.meta].filter(
+    (segment) => segment && !segment.hidden
+  );
+}
+
+function assertSameRow(label, status) {
+  const visible = visibleSegments(status);
+  assert(visible.length > 0, label + ": the status row has no visible segments");
+  const tallest = Math.max(...visible.map((segment) => segment.height));
+  const highestTop = Math.max(...visible.map((segment) => segment.top));
+  const lowestBottom = Math.min(...visible.map((segment) => segment.bottom));
+  assert(
+    highestTop < lowestBottom,
+    label + ": status segments do not share one row"
+  );
+  assert(
+    status.row.height <= tallest + 4,
+    label +
+      ": status row is " +
+      status.row.height.toFixed(2) +
+      " px tall instead of one line of text"
+  );
+}
+
+async function readDialogAccessibility(page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector(".viewer[open]");
+    if (!dialog) {
+      return null;
+    }
+    const labelledby = dialog.getAttribute("aria-labelledby");
+    const describedby = dialog.getAttribute("aria-describedby");
+    const nameNode = labelledby ? document.getElementById(labelledby) : null;
+    const descriptionNode = describedby
+      ? document.getElementById(describedby)
+      : null;
+    return {
+      labelledby,
+      describedby,
+      name: nameNode ? (nameNode.textContent || "").trim() : null,
+      description: descriptionNode
+        ? (descriptionNode.textContent || "").trim()
+        : null
+    };
+  });
+}
+
 const landscape = { width: 4000, height: 3000 };
 const portrait = { width: 3000, height: 4000 };
 
@@ -247,6 +344,7 @@ try {
 
 try {
   const routes = loadRoutes();
+  const mapRequests = [];
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 }
   });
@@ -256,6 +354,9 @@ try {
     const url = new URL(route.request().url());
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return route.continue();
+    }
+    if (url.hostname === "openstreetmap.org" || url.hostname.endsWith(".openstreetmap.org")) {
+      mapRequests.push(url.href);
     }
     const entry = routes.get(url.pathname);
     if (entry) {
@@ -289,13 +390,222 @@ try {
   });
   assert(assetsLoaded.stylesheet, "the fixture did not load the real assets/site.css");
   assert(assetsLoaded.viewer, "the fixture did not load the real assets/viewer.js");
-  assert(assetsLoaded.tiles === 2, "the fixture should provide landscape and portrait tiles");
+  assert(
+    assetsLoaded.tiles === 5,
+    "the fixture should provide five tiles"
+  );
 
   await page.locator("a.tile-link").first().click();
   await page.locator(".viewer[open]").waitFor({ state: "visible" });
   await page.locator(".viewer-image.is-placeholder").waitFor();
   await settle(page);
   assertPreview("initial landscape", await readGeometry(page), landscape);
+
+  const initialStatus = await readStatusRow(page);
+  assert(initialStatus, "the viewer did not render a .viewer-status row");
+  assert(
+    initialStatus.order.join(",") ===
+      "viewer-captured,viewer-location,viewer-meta",
+    "the status row DOM order is not captured, location, meta"
+  );
+  assert(
+    initialStatus.caption && !initialStatus.caption.hidden,
+    "the capture caption is missing from the status row"
+  );
+  assert(
+    initialStatus.location && !initialStatus.location.hidden,
+    "the location segment is missing from the status row"
+  );
+  assert(
+    initialStatus.meta && !initialStatus.meta.hidden,
+    "the camera settings segment is missing from the status row"
+  );
+  assert(
+    initialStatus.caption.text ===
+      "2024-05-01 10:00:00 · Test Camera · 3.4 MB",
+    "the status row caption text is wrong: " + initialStatus.caption.text
+  );
+  assert(
+    initialStatus.location.text === "52.5200, 13.4050",
+    "the status row location text is wrong: " + initialStatus.location.text
+  );
+  assert(
+    initialStatus.meta.text === "26 mm · f/1.8 · 1/125 s · ISO 100",
+    "the status row settings text is wrong: " + initialStatus.meta.text
+  );
+  assertSameRow("initial landscape", initialStatus);
+
+  const captionLeftGap = Math.abs(
+    initialStatus.caption.left - initialStatus.row.left
+  );
+  assert(
+    captionLeftGap <= TOLERANCE,
+    "the caption does not start at the status row's left edge (" +
+      captionLeftGap.toFixed(2) +
+      " px)"
+  );
+  const locationCentreGap = Math.abs(
+    initialStatus.location.centerX - initialStatus.row.centerX
+  );
+  assert(
+    locationCentreGap <= TOLERANCE,
+    "the location's centre is " +
+      locationCentreGap.toFixed(2) +
+      " px from the status row's centre"
+  );
+  const settingsRightGap = Math.abs(
+    initialStatus.meta.right - initialStatus.row.right
+  );
+  assert(
+    settingsRightGap <= TOLERANCE,
+    "the settings do not end at the status row's right edge (" +
+      settingsRightGap.toFixed(2) +
+      " px)"
+  );
+  assert(
+    initialStatus.overflow <= TOLERANCE,
+    "the status row overflows horizontally by " +
+      initialStatus.overflow +
+      " px"
+  );
+
+  const initialAccessibility = await readDialogAccessibility(page);
+  assert(
+    initialAccessibility && initialAccessibility.labelledby === "viewer-captured",
+    "the dialog is not labelled by the capture caption"
+  );
+  assert(
+    initialAccessibility.name === initialStatus.caption.text,
+    "the dialog's accessible name is not only the capture caption"
+  );
+  assert(
+    !initialAccessibility.name.includes(initialStatus.meta.text),
+    "the dialog's accessible name includes the camera settings"
+  );
+  assert(
+    !initialAccessibility.name.includes(initialStatus.location.text),
+    "the dialog's accessible name includes the location"
+  );
+  assert(
+    initialAccessibility.describedby === "viewer-caption",
+    "the dialog is not described by the caption element"
+  );
+  assert(
+    initialAccessibility.description.includes(initialStatus.meta.text),
+    "the dialog description omits the camera settings"
+  );
+  assert(
+    initialAccessibility.description.includes(initialStatus.location.text),
+    "the dialog description omits the location"
+  );
+
+  const locationLink = await page.evaluate(() => {
+    const link = document.querySelector(".viewer-location a");
+    if (!link) {
+      return null;
+    }
+    return {
+      href: link.getAttribute("href"),
+      label: link.getAttribute("aria-label"),
+      target: link.getAttribute("target"),
+      rel: link.getAttribute("rel"),
+      referrerPolicy: link.getAttribute("referrerpolicy"),
+      text: (link.textContent || "").trim()
+    };
+  });
+  assert(locationLink, "the status row has no location link");
+  assert(
+    locationLink.text === "52.5200, 13.4050",
+    "the location link text is wrong: " + locationLink.text
+  );
+  assert(
+    locationLink.href &&
+      locationLink.href.includes("openstreetmap.org") &&
+      locationLink.href.includes("mlat=52.520008") &&
+      locationLink.href.includes("mlon=13.404954"),
+    "the location link does not target the item's OpenStreetMap point"
+  );
+  assert(
+    locationLink.label &&
+      locationLink.label.includes("52.5200, 13.4050") &&
+      locationLink.label.includes("OpenStreetMap") &&
+      locationLink.label.includes("new tab"),
+    "the location link's accessible name is incomplete: " + locationLink.label
+  );
+  assert(
+    locationLink.target === "_blank",
+    "the location link does not open in a new tab"
+  );
+  assert(
+    locationLink.rel === "noopener noreferrer" &&
+      locationLink.referrerPolicy === "no-referrer",
+    "the location link is not isolated from the catalog window"
+  );
+  assert(
+    mapRequests.length === 0,
+    "a map request occurred before the location link was activated: " +
+      mapRequests.join(", ")
+  );
+
+  await page.setViewportSize({ width: 375, height: 800 });
+  await settle(page);
+  const narrowStatus = await readStatusRow(page);
+  assert(narrowStatus, "the viewer dropped the status row at a narrow viewport");
+  assert(
+    narrowStatus.caption && !narrowStatus.caption.hidden,
+    "the narrow status row lost the capture caption"
+  );
+  assert(
+    narrowStatus.location && !narrowStatus.location.hidden,
+    "the narrow status row lost the location segment"
+  );
+  assert(
+    narrowStatus.meta && !narrowStatus.meta.hidden,
+    "the narrow status row lost the settings segment"
+  );
+  assert(
+    narrowStatus.caption.top < narrowStatus.location.top &&
+      narrowStatus.location.top < narrowStatus.meta.top,
+    "the narrow status row does not stack caption, location, settings"
+  );
+  assert(
+    narrowStatus.caption.bottom <= narrowStatus.location.top + TOLERANCE &&
+      narrowStatus.location.bottom <= narrowStatus.meta.top + TOLERANCE,
+    "the narrow status row segments overlap"
+  );
+  assert(
+    Math.abs(narrowStatus.caption.left - narrowStatus.row.left) <= TOLERANCE &&
+      Math.abs(narrowStatus.location.left - narrowStatus.row.left) <=
+        TOLERANCE &&
+      Math.abs(narrowStatus.meta.left - narrowStatus.row.left) <= TOLERANCE,
+    "the narrow status row segments do not align left"
+  );
+  assert(
+    narrowStatus.overflow <= TOLERANCE,
+    "the narrow status row overflows horizontally by " +
+      narrowStatus.overflow +
+      " px"
+  );
+  const narrowViewer = await page.evaluate(() => {
+    const viewer = document.querySelector(".viewer").getBoundingClientRect();
+    return {
+      left: viewer.left,
+      right: viewer.right,
+      innerWidth: window.innerWidth
+    };
+  });
+  assert(
+    narrowViewer.left >= -TOLERANCE &&
+      narrowViewer.right <= narrowViewer.innerWidth + TOLERANCE,
+    "the narrow viewer extends beyond the viewport"
+  );
+  const narrowAccessibility = await readDialogAccessibility(page);
+  assert(
+    narrowAccessibility.name === narrowStatus.caption.text,
+    "the narrow status row no longer provides the dialog's accessible name"
+  );
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await settle(page);
 
   const initialControls = await readControls(page);
   assertIconControls("initial", initialControls);
@@ -417,6 +727,145 @@ try {
     "leaving immersive did not restore the control label"
   );
   assert(framedImmersive.pressed === "false", "leaving immersive kept the pressed state");
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await settle(page);
+
+  await page.keyboard.press("ArrowRight");
+  await settle(page);
+  const captionOnlyStatus = await readStatusRow(page);
+  assert(captionOnlyStatus, "the caption-only item did not render a status row");
+  assert(
+    captionOnlyStatus.caption &&
+      !captionOnlyStatus.caption.hidden &&
+      captionOnlyStatus.caption.text ===
+        "2024-05-03 08:00:00 · Test Camera · 1.2 MB",
+    "the caption-only item lost or changed its caption"
+  );
+  assert(
+    captionOnlyStatus.location && captionOnlyStatus.location.hidden,
+    "the caption-only item renders an empty location segment"
+  );
+  assert(
+    captionOnlyStatus.meta && captionOnlyStatus.meta.hidden,
+    "the caption-only item renders an empty settings segment"
+  );
+  assert(
+    visibleSegments(captionOnlyStatus).length === 1,
+    "the caption-only item renders more than one status segment"
+  );
+  assert(
+    captionOnlyStatus.statusText === captionOnlyStatus.caption.text,
+    "the caption-only status row contains extra text"
+  );
+  assert(
+    Math.abs(captionOnlyStatus.caption.left - captionOnlyStatus.row.left) <=
+      TOLERANCE,
+    "the caption-only item moved its caption off the left edge"
+  );
+  assertSameRow("caption-only", captionOnlyStatus);
+  assert(
+    captionOnlyStatus.overflow <= TOLERANCE,
+    "the caption-only status row overflows horizontally"
+  );
+
+  await page.keyboard.press("ArrowRight");
+  await settle(page);
+  const settingsOnlyStatus = await readStatusRow(page);
+  assert(
+    settingsOnlyStatus,
+    "the settings-only item did not render a status row"
+  );
+  assert(
+    settingsOnlyStatus.caption && !settingsOnlyStatus.caption.hidden,
+    "the settings-only item lost its caption"
+  );
+  assert(
+    settingsOnlyStatus.location && settingsOnlyStatus.location.hidden,
+    "the settings-only item renders an empty centre segment"
+  );
+  assert(
+    settingsOnlyStatus.meta && !settingsOnlyStatus.meta.hidden,
+    "the settings-only item lost its settings segment"
+  );
+  assert(
+    settingsOnlyStatus.meta.text === "35 mm · f/4 · 1/60 s · ISO 400",
+    "the settings-only item settings text is wrong: " +
+      settingsOnlyStatus.meta.text
+  );
+  assert(
+    Math.abs(settingsOnlyStatus.caption.left - settingsOnlyStatus.row.left) <=
+      TOLERANCE,
+    "the settings-only item moved its caption off the left edge"
+  );
+  assert(
+    Math.abs(settingsOnlyStatus.meta.right - settingsOnlyStatus.row.right) <=
+      TOLERANCE,
+    "the settings-only item moved its settings off the right edge"
+  );
+  assert(
+    visibleSegments(settingsOnlyStatus).length === 2,
+    "the settings-only item renders an unexpected number of segments"
+  );
+  assertSameRow("settings-only", settingsOnlyStatus);
+
+  await page.keyboard.press("ArrowRight");
+  await settle(page);
+  const coordsOnlyStatus = await readStatusRow(page);
+  assert(
+    coordsOnlyStatus,
+    "the coords-only item did not render a status row"
+  );
+  assert(
+    coordsOnlyStatus.caption && !coordsOnlyStatus.caption.hidden,
+    "the coords-only item lost its caption"
+  );
+  assert(
+    coordsOnlyStatus.location && !coordsOnlyStatus.location.hidden,
+    "the coords-only item lost its location segment"
+  );
+  assert(
+    coordsOnlyStatus.meta && coordsOnlyStatus.meta.hidden,
+    "the coords-only item renders an empty right segment"
+  );
+  assert(
+    coordsOnlyStatus.location.text === "40.6892, -74.0445",
+    "the coords-only item location text is wrong: " +
+      coordsOnlyStatus.location.text
+  );
+  assert(
+    Math.abs(
+      coordsOnlyStatus.location.centerX - coordsOnlyStatus.row.centerX
+    ) <= TOLERANCE,
+    "the coords-only location is not centred on the status row"
+  );
+  assert(
+    Math.abs(coordsOnlyStatus.caption.left - coordsOnlyStatus.row.left) <=
+      TOLERANCE,
+    "the coords-only item moved its caption off the left edge"
+  );
+  assert(
+    visibleSegments(coordsOnlyStatus).length === 2,
+    "the coords-only item renders an unexpected number of segments"
+  );
+  assertSameRow("coords-only", coordsOnlyStatus);
+  const coordsOnlyLink = await page.evaluate(() => {
+    const link = document.querySelector(".viewer-location a");
+    return link ? link.getAttribute("aria-label") : null;
+  });
+  assert(
+    coordsOnlyLink &&
+      coordsOnlyLink.includes("40.6892, -74.0445") &&
+      coordsOnlyLink.includes("OpenStreetMap") &&
+      coordsOnlyLink.includes("new tab"),
+    "the coords-only location link's accessible name is incomplete: " +
+      coordsOnlyLink
+  );
+  assert(
+    mapRequests.length === 0,
+    "a map request occurred before the location link was activated: " +
+      mapRequests.join(", ")
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await settle(page);

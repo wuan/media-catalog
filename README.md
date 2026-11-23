@@ -542,15 +542,20 @@ link behavior.
   month page covers that month, a sectioned event page covers every authored
   section and the Other bucket, and a search page covers the current filtered
   results. Navigation stops at the first and last item.
-- **Caption:** one line with the capture timestamp, the camera model when known,
-  and the original's file size in decimal units, for example
+- **Status row:** the caption area is one row: the capture caption sits at the
+  left, published coordinates are centred, and camera settings are at the right.
+  The caption holds the capture timestamp, the camera model when known, and the
+  original's file size in decimal units, for example
   `2024-05-01 10:11:12 · iPhone 15 Pro · 3.4 MB`. The filename is not shown;
   items from catalogs published before file sizes were recorded show no size.
-- **Camera settings:** a second line shows aperture, exposure time, ISO, and focal
-  length when known, such as `26 mm · f/1.8 · 1/125 s · ISO 100`. Unknown values
-  are omitted. When the catalog was built with `--include-location`, the
-  coordinates appear with a link that opens the point on OpenStreetMap in a new
-  tab; no map request happens until the link is activated.
+  Missing parts are omitted without leaving gaps, and the row stacks the caption,
+  coordinates, and settings on narrow screens.
+- **Camera settings:** the right segment shows aperture, exposure time, ISO, and
+  focal length when known, such as `26 mm · f/1.8 · 1/125 s · ISO 100`; unknown
+  values are omitted.
+- **Location:** with `--include-location`, the coordinates appear in the centred
+  segment with a link that opens the point on OpenStreetMap in a new tab; no map
+  request happens until the link is activated.
 - **Navigation:** use the previous and next controls, the Left/Right arrow keys,
   or a horizontal swipe while an image is at fit scale. Arrow keys keep
   navigating while an image is zoomed.

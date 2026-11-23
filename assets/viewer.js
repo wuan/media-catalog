@@ -377,6 +377,8 @@
     var caption = document.createElement("div");
     caption.className = "viewer-caption";
     caption.id = "viewer-caption";
+    var status = document.createElement("div");
+    status.className = "viewer-status";
     captured = document.createElement("p");
     captured.className = "viewer-captured";
     captured.id = "viewer-captured";
@@ -397,9 +399,10 @@
     error.hidden = true;
     error.textContent =
       "This item cannot be played here. Use the original link to open it.";
-    caption.appendChild(captured);
-    caption.appendChild(meta);
-    caption.appendChild(location);
+    status.appendChild(captured);
+    status.appendChild(location);
+    status.appendChild(meta);
+    caption.appendChild(status);
     caption.appendChild(error);
 
     var bottom = document.createElement("div");
