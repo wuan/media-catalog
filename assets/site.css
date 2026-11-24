@@ -623,7 +623,7 @@ footer {
 .viewer-map-preview {
   position: fixed;
   z-index: 3;
-  width: 260px;
+  width: min(390px, calc(100vw - 2rem));
   padding: 0.35rem;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 0.55rem;
@@ -638,7 +638,8 @@ footer {
 .viewer-map-frame {
   display: block;
   width: 100%;
-  height: 150px;
+  aspect-ratio: 260 / 150;
+  height: auto;
   border: 0;
   border-radius: 0.35rem;
   background: #1b1b1e;

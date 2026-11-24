@@ -1324,7 +1324,7 @@ try {
     "the blocked embed changed the location link: " + blockedPreview.linkHref
   );
   assert(
-    blockedPreview.height >= 150 && blockedPreview.height <= 200,
+    blockedPreview.height >= 240 && blockedPreview.height <= 280,
     "the blocked embed changed the popover height: " +
       blockedPreview.height.toFixed(1)
   );

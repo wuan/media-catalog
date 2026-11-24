@@ -17,8 +17,8 @@
   var PREVIEW_DELAY_MS = 200;
   // Latitude span of the preview bbox; longitude is scaled by 1 / cos(lat).
   var PREVIEW_LAT_SPAN = 0.006;
-  var PREVIEW_WIDTH = 260;
-  var PREVIEW_HEIGHT = 184;
+  var PREVIEW_WIDTH = 390;
+  var PREVIEW_HEIGHT = 259;
   var PREVIEW_GAP = 8;
   var SVG_NS = "http://www.w3.org/2000/svg";
 
