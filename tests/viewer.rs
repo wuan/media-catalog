@@ -69,23 +69,46 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
     assert_eq!(result["tileName"], "a.jpg");
     assert_eq!(result["tileCaptured"], "2024-05-01 10:00:00");
     assert_eq!(result["tileModel"], "iPhone 15 Pro");
-    assert_eq!(result["tileCaption"], "2024-05-01 10:00:00 · iPhone 15 Pro");
+    assert_eq!(
+        result["tileCaption"],
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 4000x3000 12.0MP"
+    );
     assert_eq!(result["bareTileModel"], "");
-    assert_eq!(result["bareTileCaption"], "2024-05-01 10:00:00");
+    assert_eq!(
+        result["bareTileCaption"],
+        "2024-05-01 10:00:00 · 4000x3000 12.0MP"
+    );
     assert_eq!(result["sizedTileSize"], 3_400_000.0);
     assert_eq!(
         result["sizedTileCaption"],
-        "2024-05-01 10:00:00 · iPhone 15 Pro · 3.4 MB"
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 4000x3000 12.0MP · 3.4 MB"
     );
     assert_eq!(
         result["sizedBareTileCaption"],
-        "2024-05-01 10:00:00 · 532 kB"
+        "2024-05-01 10:00:00 · 4000x3000 12.0MP · 532 kB"
     );
     assert_eq!(result["badSizeTileSize"], Value::Null);
     assert_eq!(
         result["badSizeTileCaption"],
-        "2024-05-01 10:00:00 · iPhone 15 Pro"
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 4000x3000 12.0MP"
     );
+    assert_eq!(
+        result["videoCaption"],
+        "2024-05-03 09:00:00 · iPhone 15 Pro · 1920x1080 2.1MP · 1.5 MB"
+    );
+    assert_eq!(
+        result["roundedCaption"],
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 4032x3024 12.2MP"
+    );
+    assert_eq!(
+        result["missingDimensionCaption"],
+        "2024-05-01 10:00:00 · iPhone 15 Pro · 3.4 MB"
+    );
+    assert_eq!(result["megapixelsLandscape"], "12.0MP");
+    assert_eq!(result["megapixelsVideo"], "2.1MP");
+    assert_eq!(result["megapixelsRounded"], "12.2MP");
+    assert_eq!(result["megapixelsSmall"], "0.3MP");
+    assert_eq!(result["megapixelsMissing"], "");
     assert_eq!(result["sizeBytes"], "845 B");
     assert_eq!(result["sizeKilobytes"], "532 kB");
     assert_eq!(result["sizeRoundsUpToMegabytes"], "1.0 MB");

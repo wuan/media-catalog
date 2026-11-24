@@ -826,8 +826,36 @@
     return unit === 0 ? String(Math.round(value)) : value.toFixed(1);
   }
 
+  // Megapixels from the upright pixel dimensions, always one decimal place.
+  function formatMegapixels(width, height) {
+    if (
+      typeof width !== "number" ||
+      typeof height !== "number" ||
+      !isFinite(width) ||
+      !isFinite(height) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      return "";
+    }
+    return ((width * height) / 1000000).toFixed(1) + "MP";
+  }
+
+  function dimensionText(item) {
+    var megapixels = formatMegapixels(item.width, item.height);
+    if (!megapixels) {
+      return "";
+    }
+    return item.width + "x" + item.height + " " + megapixels;
+  }
+
   function captionText(item) {
-    return [item.captured, item.model, formatFileSize(item.size)]
+    return [
+      item.captured,
+      item.model,
+      dimensionText(item),
+      formatFileSize(item.size)
+    ]
       .filter(Boolean)
       .join(" · ");
   }
@@ -1637,6 +1665,7 @@
     isSwipe: isSwipe,
     tileFromElement: tileFromElement,
     captionText: captionText,
+    formatMegapixels: formatMegapixels,
     formatFileSize: formatFileSize,
     formatExposure: formatExposure,
     metadataText: metadataText,

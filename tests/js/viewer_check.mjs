@@ -59,9 +59,42 @@ function withSize(base, size) {
     querySelector: base.querySelector
   };
 }
+function withAttributes(base, attributes) {
+  return {
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attributes, name)
+        ? attributes[name]
+        : base.getAttribute(name);
+    },
+    querySelector: base.querySelector
+  };
+}
 const sizedTile = api.tileFromElement(withSize(fakeTile, "3400000"));
 const sizedBareTile = api.tileFromElement(withSize(bareTile.element, "532000"));
 const badSizeTile = api.tileFromElement(withSize(fakeTile, "12abc"));
+const videoTile = api.tileFromElement(
+  withAttributes(fakeTile, {
+    href: "/media/fixture/clip.mp4",
+    "data-item-path": "fixture/clip.mp4",
+    "data-kind": "video",
+    "data-captured": "2024-05-03 09:00:00",
+    "data-width": "1920",
+    "data-height": "1080",
+    "data-size": "1500000"
+  })
+);
+const roundedTile = api.tileFromElement(
+  withAttributes(fakeTile, {
+    "data-width": "4032",
+    "data-height": "3024"
+  })
+);
+const missingDimensionTile = api.tileFromElement(
+  withAttributes(fakeTile, {
+    "data-height": null,
+    "data-size": "3400000"
+  })
+);
 
 const result = {
   item: api.parseItemParam("?q=alpha&item=2024/05/a.jpg"),
@@ -105,6 +138,14 @@ const result = {
   sizedBareTileCaption: api.captionText(sizedBareTile),
   badSizeTileSize: badSizeTile.size,
   badSizeTileCaption: api.captionText(badSizeTile),
+  videoCaption: api.captionText(videoTile),
+  roundedCaption: api.captionText(roundedTile),
+  missingDimensionCaption: api.captionText(missingDimensionTile),
+  megapixelsLandscape: api.formatMegapixels(4000, 3000),
+  megapixelsVideo: api.formatMegapixels(1920, 1080),
+  megapixelsRounded: api.formatMegapixels(4032, 3024),
+  megapixelsSmall: api.formatMegapixels(640, 480),
+  megapixelsMissing: api.formatMegapixels(4000, null),
   sizeBytes: api.formatFileSize(845),
   sizeKilobytes: api.formatFileSize(532000),
   sizeRoundsUpToMegabytes: api.formatFileSize(999950),

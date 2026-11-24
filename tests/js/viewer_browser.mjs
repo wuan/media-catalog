@@ -422,7 +422,7 @@ try {
   );
   assert(
     initialStatus.caption.text ===
-      "2024-05-01 10:00:00 · Test Camera · 3.4 MB",
+      "2024-05-01 10:00:00 · Test Camera · 4000x3000 12.0MP · 3.4 MB",
     "the status row caption text is wrong: " + initialStatus.caption.text
   );
   assert(
@@ -739,7 +739,7 @@ try {
     captionOnlyStatus.caption &&
       !captionOnlyStatus.caption.hidden &&
       captionOnlyStatus.caption.text ===
-        "2024-05-03 08:00:00 · Test Camera · 1.2 MB",
+        "2024-05-03 08:00:00 · Test Camera · 4000x3000 12.0MP · 1.2 MB",
     "the caption-only item lost or changed its caption"
   );
   assert(
