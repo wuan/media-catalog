@@ -154,6 +154,11 @@ h1 {
   font-weight: 700;
 }
 
+/* Event cards use a quieter title than year and month cards. */
+.event-list .event-title {
+  font-size: 0.5rem;
+}
+
 .range {
   color: var(--muted);
 }
