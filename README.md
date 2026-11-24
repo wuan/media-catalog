@@ -594,7 +594,8 @@ link behavior.
   play is pressed again. A video pauses playback and waits for the visitor;
   pressing play on a video advances to the next item and resumes there. Closing
   the viewer clears the timer, so reopening always starts paused.
-- **Images:** the thumbnail is shown while the original loads, each newly opened
+- **Images:** the thumbnail stays visible until the original has decoded, then
+  the decoded original replaces it without a blank frame; each newly opened
   item starts at fit scale, and pinch, wheel, double-tap/double-click, and
   `+`/`-`/`0` zoom with panning clamped to the viewport. Zoom resets when
   moving to another item, and adjacent images are preloaded after idle unless

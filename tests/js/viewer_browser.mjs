@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 
 const TOLERANCE = 1.5;
 const SKIP_CODE = 77;
+// A real 1x1 JPEG so the browser regression has a decodable original; geometry
+// comes from the fixture's catalog dimensions, not from the file.
+const LANDSCAPE_ORIGINAL_JPEG =
+  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==";
+const LANDSCAPE_ORIGINAL_PATH = "/media/fixture/landscape.jpg";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
@@ -88,6 +93,49 @@ async function settle(page) {
         window.requestAnimationFrame(() => resolve());
       })
   );
+}
+
+// Hold HTMLImageElement.decode() for one URL so a test can observe the viewer
+// while the original is downloadable but not yet paintable.
+async function installDecodeDelay(page, targetPath) {
+  await page.addInitScript((target) => {
+    const nativeDecode = HTMLImageElement.prototype.decode;
+    const waiters = [];
+    window.__decodeRequests = 0;
+    window.__decodeCompleted = 0;
+    window.__decodeRelease = () => {
+      const pending = waiters.splice(0);
+      for (const release of pending) {
+        release();
+      }
+    };
+    HTMLImageElement.prototype.decode = function () {
+      let path = null;
+      try {
+        path = new URL(this.src, document.baseURI).pathname;
+      } catch (ignored) {
+        path = null;
+      }
+      if (path !== target) {
+        return nativeDecode.call(this);
+      }
+      window.__decodeRequests += 1;
+      return new Promise((resolve, reject) => {
+        waiters.push(() => {
+          nativeDecode.call(this).then(
+            (value) => {
+              window.__decodeCompleted += 1;
+              resolve(value);
+            },
+            (error) => {
+              window.__decodeCompleted += 1;
+              reject(error);
+            }
+          );
+        });
+      });
+    };
+  }, targetPath);
 }
 
 async function readGeometry(page) {
@@ -1093,7 +1141,8 @@ try {
 
   await context.close();
 
-  async function serveWithRoutes(targetPage, mapLog, shouldBlock) {
+  async function serveWithRoutes(targetPage, mapLog, shouldBlock, routeTable) {
+    const table = routeTable || routes;
     await targetPage.route("**/*", (route) => {
       const url = new URL(route.request().url());
       if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -1113,7 +1162,7 @@ try {
           body: "<!doctype html><title>Map</title><p>Map</p>"
         });
       }
-      const entry = routes.get(url.pathname);
+      const entry = table.get(url.pathname);
       if (entry) {
         return route.fulfill({
           status: 200,
@@ -1428,6 +1477,154 @@ try {
     "touch input changed the location link"
   );
   await touchContext.close();
+
+  // The thumbnail must stay painted while the original downloads and decodes,
+  // then the decoded original replaces it in one DOM operation.
+  const decodeRoutes = new Map(routes);
+  decodeRoutes.set(LANDSCAPE_ORIGINAL_PATH, {
+    type: "image/jpeg",
+    body: Buffer.from(LANDSCAPE_ORIGINAL_JPEG, "base64")
+  });
+
+  const decodeContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const decodePage = await decodeContext.newPage();
+  await installDecodeDelay(decodePage, LANDSCAPE_ORIGINAL_PATH);
+  await serveWithRoutes(decodePage, [], () => false, decodeRoutes);
+  await decodePage.goto("http://viewer.test/", { waitUntil: "load" });
+  await decodePage.locator("a.tile-link").first().click();
+  await decodePage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await decodePage.locator(".viewer-image.is-placeholder").waitFor();
+  await decodePage.waitForFunction(() => window.__decodeRequests >= 1);
+
+  const decoding = await decodePage.evaluate(() => {
+    const images = Array.from(document.querySelectorAll(".viewer-image"));
+    const image = images[0];
+    return {
+      count: images.length,
+      placeholder: image.classList.contains("is-placeholder"),
+      original: image.classList.contains("is-original"),
+      src: image.getAttribute("src"),
+      thumb: document
+        .querySelector('a.tile-link[data-item-path="fixture/landscape.jpg"]')
+        .getAttribute("data-thumb-url")
+    };
+  });
+  assert(
+    decoding.count === 1,
+    "the stage held " + decoding.count + " images while the original decoded"
+  );
+  assert(
+    decoding.placeholder && !decoding.original,
+    "the viewer dropped the thumbnail while the original was decoding"
+  );
+  assert(
+    decoding.src === decoding.thumb,
+    "the visible image stopped pointing at the thumbnail while the original decoded: " +
+      decoding.src
+  );
+
+  await decodePage.evaluate(() => window.__decodeRelease());
+  await decodePage.locator(".viewer-image.is-original").waitFor();
+  await settle(decodePage);
+  const adopted = await decodePage.evaluate(() => {
+    const images = Array.from(document.querySelectorAll(".viewer-image"));
+    const image = images[0];
+    return {
+      count: images.length,
+      placeholder: image.classList.contains("is-placeholder"),
+      original: image.classList.contains("is-original"),
+      src: image.getAttribute("src"),
+      alt: image.getAttribute("alt"),
+      draggable: image.draggable
+    };
+  });
+  assert(
+    adopted.count === 1,
+    "the stage held " + adopted.count + " images after adopting the original"
+  );
+  assert(
+    adopted.original && !adopted.placeholder,
+    "the decoded original was not adopted as the viewer image"
+  );
+  assert(
+    new URL(adopted.src, "http://viewer.test/").pathname ===
+      LANDSCAPE_ORIGINAL_PATH,
+    "the adopted image does not show the original: " + adopted.src
+  );
+  assert(
+    adopted.alt === "Landscape fixture",
+    "the adopted image lost the item's alt text: " + adopted.alt
+  );
+  assert(
+    adopted.draggable === false,
+    "the adopted image became draggable"
+  );
+  await decodeContext.close();
+
+  // Navigating while the previous original is decoding keeps the new preview
+  // and never installs the stale original.
+  const navContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const navPage = await navContext.newPage();
+  await installDecodeDelay(navPage, LANDSCAPE_ORIGINAL_PATH);
+  await serveWithRoutes(navPage, [], () => false, decodeRoutes);
+  await navPage.goto("http://viewer.test/", { waitUntil: "load" });
+  await navPage.locator("a.tile-link").first().click();
+  await navPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await navPage.locator(".viewer-image.is-placeholder").waitFor();
+  await navPage.waitForFunction(() => window.__decodeRequests >= 1);
+
+  await navPage.keyboard.press("ArrowRight");
+  await settle(navPage);
+  await navPage.evaluate(() => window.__decodeRelease());
+  await navPage.waitForFunction(() => window.__decodeCompleted >= 1);
+  await settle(navPage);
+
+  const afterNavigation = await navPage.evaluate(() => {
+    const images = Array.from(document.querySelectorAll(".viewer-image"));
+    const image = images[0];
+    return {
+      count: images.length,
+      placeholder: image.classList.contains("is-placeholder"),
+      original: image.classList.contains("is-original"),
+      src: image.getAttribute("src"),
+      thumb: document
+        .querySelector('a.tile-link[data-item-path="fixture/portrait.jpg"]')
+        .getAttribute("data-thumb-url"),
+      staleOriginals: document.querySelectorAll(
+        'img.viewer-image[src*="landscape.jpg"]'
+      ).length,
+      caption: (document.querySelector(".viewer-captured") || {}).textContent || ""
+    };
+  });
+  assert(
+    afterNavigation.count === 1,
+    "the stage held " +
+      afterNavigation.count +
+      " images after navigating during decode"
+  );
+  assert(
+    afterNavigation.placeholder && !afterNavigation.original,
+    "the stale original replaced the next item's preview"
+  );
+  assert(
+    afterNavigation.src === afterNavigation.thumb,
+    "the next item's preview stopped pointing at its thumbnail: " +
+      afterNavigation.src
+  );
+  assert(
+    afterNavigation.staleOriginals === 0,
+    "the previous item's original was installed after navigation"
+  );
+  assert(
+    afterNavigation.caption.startsWith("2024-05-02"),
+    "navigation during decode did not reach the next item: " +
+      afterNavigation.caption.trim()
+  );
+  await navContext.close();
 
   console.log("viewer browser regression passed");
 } catch (error) {

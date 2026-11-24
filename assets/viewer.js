@@ -1250,17 +1250,38 @@
       state.originalLoader = null;
       preloadNeighbours();
     };
-    original.onload = function () {
+    // Swap the decoded original in for the thumbnail in one DOM operation so
+    // the stage never paints a frame with neither bitmap (Chromium clears a
+    // visible image's raster as soon as its src changes).
+    var adopt = function () {
       if (state.media !== image) {
+        settle();
         return;
       }
-      image.classList.remove("is-placeholder");
-      image.style.width = "";
-      image.style.height = "";
-      image.src = item.mediaUrl;
-      image.classList.add("is-original");
+      original.className = "viewer-image is-original";
+      original.alt = item.alt;
+      original.decoding = "async";
+      original.draggable = false;
+      wrap.replaceChildren(original);
+      state.media = original;
+      measureFit();
       settle();
     };
+    original.onload = function () {
+      if (state.media !== image) {
+        settle();
+        return;
+      }
+      if (typeof original.decode === "function") {
+        original.decode().then(adopt, settle);
+      } else {
+        // Without decode() a synchronous decode is the closest guarantee that
+        // the adopted element has a bitmap when it enters the document.
+        original.decoding = "sync";
+        adopt();
+      }
+    };
+    // A load or decode failure leaves the thumbnail preview in place.
     original.onerror = settle;
     state.originalLoader = original;
     original.src = item.mediaUrl;
