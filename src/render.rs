@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use askama::Template;
-use chrono::NaiveDateTime;
+use chrono::{Datelike, NaiveDate, NaiveDateTime};
 
 use crate::model::{Catalog, EventView, ItemView, MonthView};
 use crate::paths::{event_page_url, month_page_url, year_page_url};
@@ -29,7 +29,6 @@ struct EventsTemplate {
 struct EventLink {
     title: String,
     range: String,
-    description: String,
     count: usize,
     url: String,
 }
@@ -219,11 +218,43 @@ pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
 fn event_link(event: &EventView) -> EventLink {
     EventLink {
         title: event.title.clone(),
-        range: event_range(event),
-        description: event.description.clone().unwrap_or_default(),
+        range: event_span(&event.start, &event.end),
         count: event.item_count,
         url: event_page_url(&event.slug),
     }
+}
+
+/// Format a month-level span for overview entries. Days and times are dropped
+/// so short events read as the month they occupy.
+fn event_span(start: &str, end: &str) -> String {
+    let (Some((start_year, start_month)), Some((end_year, end_month))) =
+        (parse_month(start), parse_month(end))
+    else {
+        return format!("{start} to {end}");
+    };
+    let start_label = short_month(start_year, start_month);
+    let end_label = short_month(end_year, end_month);
+    if start_year == end_year {
+        if start_month == end_month {
+            format!("{start_label} {start_year}")
+        } else {
+            format!("{start_label}-{end_label} {start_year}")
+        }
+    } else {
+        format!("{start_label} {start_year} - {end_label} {end_year}")
+    }
+}
+
+fn parse_month(raw: &str) -> Option<(i32, u32)> {
+    NaiveDateTime::parse_from_str(raw.trim(), "%Y-%m-%d %H:%M")
+        .ok()
+        .map(|timestamp| (timestamp.year(), timestamp.month()))
+}
+
+fn short_month(year: i32, month: u32) -> String {
+    NaiveDate::from_ymd_opt(year, month, 1)
+        .map(|date| date.format("%b").to_string())
+        .unwrap_or_else(|| format!("{month:02}"))
 }
 
 fn event_range(event: &EventView) -> String {
@@ -846,6 +877,26 @@ mod tests {
     }
 
     #[test]
+    fn overview_span_formats_months() {
+        assert_eq!(
+            event_span("2024-05-01 00:00", "2024-05-31 23:59"),
+            "May 2024"
+        );
+        assert_eq!(
+            event_span("2024-05-28 09:00", "2024-06-05 18:30"),
+            "May-Jun 2024"
+        );
+        assert_eq!(
+            event_span("2024-12-20 10:00", "2025-01-10 12:00"),
+            "Dec 2024 - Jan 2025"
+        );
+        assert_eq!(
+            event_span("2024-05-01 00:00", "2026-05-31 23:59"),
+            "May 2024 - May 2026"
+        );
+    }
+
+    #[test]
     fn root_and_event_list_show_events_above_years() {
         let catalog = cross_month_catalog();
         let root = render_index(&catalog).unwrap();
@@ -854,13 +905,57 @@ mod tests {
         assert!(events_heading < years_heading);
         assert!(root.contains("href=\"/events/may-trip/\""));
         assert!(root.contains("May trip"));
+        assert!(root.contains("May-Jun 2024"));
+        assert!(root.contains("2 items"));
+        assert!(!root.contains("A crossing event."));
+        assert!(!root.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
 
         let list = render_events(&catalog).unwrap();
         assert!(list.contains("May trip"));
-        assert!(list.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
+        assert!(list.contains("May-Jun 2024"));
         assert!(list.contains("2 items"));
         assert!(list.contains("href=\"/events/may-trip/\""));
-        assert!(list.contains("A crossing event."));
+        assert!(!list.contains("A crossing event."));
+        assert!(!list.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
+
+        let event = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(event.contains("2024-05-28 09:00 to 2024-06-05 18:30"));
+        assert!(event.contains("A crossing event."));
+    }
+
+    fn multi_span_catalog() -> Catalog {
+        event_catalog(
+            vec![
+                item("2024/05/a.jpg", 2024, 5, "2024-05-02 10:00:00"),
+                item("2024/05/b.jpg", 2024, 5, "2024-05-30 10:00:00"),
+                item("2024/06/c.jpg", 2024, 6, "2024-06-02 10:00:00"),
+                item("2024/12/d.jpg", 2024, 12, "2024-12-21 10:00:00"),
+                item("2025/01/e.jpg", 2025, 1, "2025-01-05 10:00:00"),
+            ],
+            vec![
+                event_meta("may", "May single", "2024-05-01 00:00", "2024-05-31 23:59"),
+                event_meta(
+                    "may-june",
+                    "May to June",
+                    "2024-05-28 09:00",
+                    "2024-06-05 18:30",
+                ),
+                event_meta(
+                    "winter",
+                    "Winter crossing",
+                    "2024-12-20 10:00",
+                    "2025-01-10 12:00",
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn snapshot_events_multi_span() {
+        insta::assert_snapshot!(
+            "events_multi_span",
+            render_events(&multi_span_catalog()).unwrap()
+        );
     }
 
     #[test]

@@ -396,8 +396,9 @@ async fn renders_event_routes_as_a_second_browsing_axis() {
     assert_eq!(status, StatusCode::OK);
     let list = String::from_utf8_lossy(&body);
     assert!(list.contains("May trip"));
-    assert!(list.contains("2024-05-01 00:00 to 2024-06-30 23:59"));
+    assert!(list.contains("May-Jun 2024"));
     assert!(list.contains("2 items"));
+    assert!(!list.contains("A crossing event."));
 
     let (status, headers, body) = send(app.clone(), Method::GET, "/events/may-trip/").await;
     assert_eq!(status, StatusCode::OK);

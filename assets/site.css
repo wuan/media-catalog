@@ -158,6 +158,11 @@ h1 {
   color: var(--muted);
 }
 
+.event-list .range,
+.event-list .count {
+  font-size: 0.85rem;
+}
+
 .description {
   max-width: 60ch;
 }
