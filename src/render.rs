@@ -46,6 +46,7 @@ struct EventTemplate {
     section_nav: Vec<SectionLink>,
     sections: Vec<EventSectionSection>,
     other_items: Vec<TileView>,
+    location_preview: bool,
 }
 
 struct EventMonthSection {
@@ -94,6 +95,7 @@ struct MonthTemplate {
     items: Vec<TileView>,
     prev_month: Option<MonthNavLink>,
     next_month: Option<MonthNavLink>,
+    location_preview: bool,
 }
 
 /// A neighbouring month page link used by the month navigation fragment.
@@ -207,6 +209,7 @@ pub fn render_event(catalog: &Catalog, slug: &str) -> Result<Option<String>> {
         section_nav,
         sections,
         other_items: event.other_items.iter().map(tile_from_item).collect(),
+        location_preview: catalog.location_preview,
     }
     .render()
     .with_context(|| format!("rendering event {}", event.slug))?;
@@ -264,6 +267,7 @@ pub fn render_month(catalog: &Catalog, year: i32, month: u32) -> Result<Option<S
         items: view.items.iter().map(tile_from_item).collect(),
         prev_month,
         next_month,
+        location_preview: catalog.location_preview,
     }
     .render()
     .with_context(|| format!("rendering {}-{:02}", view.year, view.month))?;
@@ -782,6 +786,27 @@ mod tests {
                 "{label} page must load the viewer once"
             );
         }
+    }
+
+    #[test]
+    fn preview_attribute_follows_the_catalog_setting() {
+        let mut catalog = cross_month_catalog();
+        let month_off = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        let event_off = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(!month_off.contains("data-location-preview"));
+        assert!(!event_off.contains("data-location-preview"));
+
+        catalog.location_preview = true;
+        let month_on = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        let event_on = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(
+            month_on.contains("<body data-location-preview=\"true\">"),
+            "{month_on}"
+        );
+        assert!(
+            event_on.contains("<body id=\"top\" data-location-preview=\"true\">"),
+            "{event_on}"
+        );
     }
 
     fn event_meta(slug: &str, title: &str, start: &str, end: &str) -> EventMeta {

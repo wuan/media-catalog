@@ -152,6 +152,9 @@ pub struct Catalog {
     pub item_count: usize,
     /// Events ordered by newest start and then slug.
     pub events: Vec<EventView>,
+    /// Whether the deployment offers a hover/focus map preview for published
+    /// coordinates. Learned from the published index, default off.
+    pub location_preview: bool,
 }
 
 impl Catalog {
@@ -270,6 +273,7 @@ pub fn build_catalog(
         years,
         item_count: total,
         events: Vec::new(),
+        location_preview: false,
     }
 }
 

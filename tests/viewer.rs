@@ -137,6 +137,16 @@ fn viewer_helpers_cover_url_album_zoom_and_swipe_rules() {
         result["locationLabel"],
         "Open location 52.5200, 13.4050 on OpenStreetMap (opens in a new tab)"
     );
+    assert_eq!(
+        result["previewBbox"],
+        "13.400024,52.517008,13.409884,52.523008"
+    );
+    assert_eq!(
+        result["previewUrl"],
+        "https://www.openstreetmap.org/export/embed.html?bbox=13.400024,52.517008,13.409884,52.523008&layer=mapnik&marker=52.520008,13.404954"
+    );
+    assert_eq!(result["previewTitle"], "Map preview of 52.5200, 13.4050");
+    assert_eq!(result["previewDelay"], 200);
     assert_eq!(result["hasLocation"], true);
     assert_eq!(result["noLocation"], false);
     assert_eq!(result["tileAlt"], "a.jpg");

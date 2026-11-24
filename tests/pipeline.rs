@@ -493,6 +493,47 @@ fn camera_metadata_is_published_and_location_is_opt_in() {
 }
 
 #[test]
+fn location_preview_is_advertised_only_when_enabled() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/photo.jpg",
+        Some(1),
+        Some("2024:05:01 10:11:12"),
+        true,
+    );
+
+    let mut config = fixture.config();
+    config.include_location = true;
+    config.location_preview = true;
+    let enabled = run_with_config(config).unwrap();
+    assert!(
+        enabled.summary.errors.is_empty(),
+        "{:?}",
+        enabled.summary.errors
+    );
+
+    let index: Value = serde_json::from_str(&fixture.read_json("catalog/index.json")).unwrap();
+    assert_eq!(index["location_preview"], true);
+    let html = rendered_month(&fixture, 2024, 5);
+    assert!(html.contains("<body data-location-preview=\"true\">"));
+    assert!(html.contains("data-lat=\"52.52\""));
+
+    let mut config = fixture.config();
+    config.include_location = true;
+    let disabled = run_with_config(config).unwrap();
+    assert!(
+        disabled.summary.errors.is_empty(),
+        "{:?}",
+        disabled.summary.errors
+    );
+
+    let index: Value = serde_json::from_str(&fixture.read_json("catalog/index.json")).unwrap();
+    assert!(index.get("location_preview").is_none());
+    let html = rendered_month(&fixture, 2024, 5);
+    assert!(!html.contains("data-location-preview"));
+}
+
+#[test]
 fn video_location_is_published_when_enabled() {
     let fixture = Fixture::new();
     if !fixture.write_video_with_location("2024/05/clip.mp4", 1, "+52.5200+013.4050/") {

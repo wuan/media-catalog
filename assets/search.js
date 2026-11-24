@@ -28,6 +28,16 @@
     });
   }
 
+  function applyLocationPreview(index) {
+    // Older indexes omit the field; treat that as disabled and leave the body
+    // without the attribute so the viewer makes no third-party request.
+    if (index && index.location_preview === true) {
+      document.body.setAttribute("data-location-preview", "true");
+    } else {
+      document.body.removeAttribute("data-location-preview");
+    }
+  }
+
   function loadCatalog() {
     return fetch("/catalog/index.json", { cache: "no-cache" })
       .then(function (response) {
@@ -274,6 +284,7 @@
       .then(function (result) {
         state.items = result.items;
         state.index = result.index;
+        applyLocationPreview(result.index);
         populateSelects(result.index);
         restoreFiltersFromUrl();
         applyFilters(state.items);
@@ -305,6 +316,7 @@
     captionText: captionText,
     metadataAttributes: metadataAttributes,
     filtersFromParams: filtersFromParams,
-    filtersToQuery: filtersToQuery
+    filtersToQuery: filtersToQuery,
+    applyLocationPreview: applyLocationPreview
   };
 })();

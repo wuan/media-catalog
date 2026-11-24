@@ -20,21 +20,63 @@ function assert(condition, message) {
 }
 
 function loadRoutes() {
+  const fixtureHtml = fs.readFileSync(path.join(root, "tests/js/fixtures/viewer-browser.html"), "utf8");
+  const searchHtml = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Search fixture</title>
+    <link rel="stylesheet" href="/assets/site.css"></head>
+  <body>
+    <main>
+      <h1>Search</h1>
+      <form id="filters" autocomplete="off">
+        <label>Text<input id="q" name="q" type="search"></label>
+        <label>Type<select id="kind" name="kind"><option value="">All types</option></select></label>
+        <label>Year<select id="year" name="year"><option value="">All years</option></select></label>
+        <label>Month<select id="month" name="month"><option value="">All months</option></select></label>
+      </form>
+      <p id="status" class="status" role="status">Loading catalog…</p>
+      <div id="results" class="grid"></div>
+    </main>
+    <script src="/assets/search.js"></script>
+  </body>
+</html>`;
+  const searchIndex = JSON.stringify({
+    schema_version: 2,
+    total_items: 0,
+    location_preview: true,
+    years: []
+  });
   const files = {
-    "/": { file: path.join(root, "tests/js/fixtures/viewer-browser.html"), type: "text/html; charset=utf-8" },
-    "/tests/js/fixtures/viewer-browser.html": {
-      file: path.join(root, "tests/js/fixtures/viewer-browser.html"),
+    "/": { body: fixtureHtml, type: "text/html; charset=utf-8" },
+    "/preview.html": {
+      body: fixtureHtml.replace("<body>", '<body data-location-preview="true">'),
       type: "text/html; charset=utf-8"
     },
-    "/assets/site.css": { file: path.join(root, "assets/site.css"), type: "text/css; charset=utf-8" },
-    "/assets/viewer.js": { file: path.join(root, "assets/viewer.js"), type: "text/javascript; charset=utf-8" }
+    "/tests/js/fixtures/viewer-browser.html": {
+      body: fixtureHtml,
+      type: "text/html; charset=utf-8"
+    },
+    "/search.html": { body: searchHtml, type: "text/html; charset=utf-8" },
+    "/catalog/index.json": {
+      body: searchIndex,
+      type: "application/json; charset=utf-8"
+    },
+    "/assets/site.css": {
+      body: fs.readFileSync(path.join(root, "assets/site.css"), "utf8"),
+      type: "text/css; charset=utf-8"
+    },
+    "/assets/viewer.js": {
+      body: fs.readFileSync(path.join(root, "assets/viewer.js"), "utf8"),
+      type: "text/javascript; charset=utf-8"
+    },
+    "/assets/search.js": {
+      body: fs.readFileSync(path.join(root, "assets/search.js"), "utf8"),
+      type: "text/javascript; charset=utf-8"
+    }
   };
   const routes = new Map();
   for (const [routePath, entry] of Object.entries(files)) {
-    routes.set(routePath, {
-      type: entry.type,
-      body: fs.readFileSync(entry.file, "utf8")
-    });
+    routes.set(routePath, { type: entry.type, body: entry.body });
   }
   return routes;
 }
@@ -325,6 +367,93 @@ async function readDialogAccessibility(page) {
   });
 }
 
+async function readPreview(page) {
+  return page.evaluate(() => {
+    const preview = document.querySelector(".viewer-map-preview");
+    const frame = document.querySelector(".viewer-map-frame");
+    const caption = document.querySelector(".viewer-map-caption");
+    const link = document.querySelector(".viewer-location a");
+    const dialog = document.querySelector(".viewer[open]");
+    if (!preview || !frame || !caption || !link || !dialog) {
+      return null;
+    }
+    const box = preview.getBoundingClientRect();
+    const bounds = dialog.getBoundingClientRect();
+    const anchor = link.getBoundingClientRect();
+    return {
+      visible: !preview.hidden && getComputedStyle(preview).display !== "none",
+      left: box.left,
+      top: box.top,
+      right: box.right,
+      bottom: box.bottom,
+      width: box.width,
+      height: box.height,
+      dialog: {
+        left: bounds.left,
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom
+      },
+      anchor: {
+        left: anchor.left,
+        top: anchor.top,
+        right: anchor.right,
+        bottom: anchor.bottom
+      },
+      caption: (caption.textContent || "").trim(),
+      title: frame.getAttribute("title"),
+      loading: frame.getAttribute("loading"),
+      referrerpolicy: frame.getAttribute("referrerpolicy"),
+      tabindex: frame.getAttribute("tabindex"),
+      src: frame.getAttribute("src"),
+      linkHref: link.getAttribute("href"),
+      linkTarget: link.getAttribute("target"),
+      linkText: (link.textContent || "").trim(),
+      active: document.activeElement
+        ? document.activeElement.tagName.toLowerCase() +
+          "." +
+          String(document.activeElement.className || "")
+        : null
+    };
+  });
+}
+
+function assertPreviewInside(label, preview) {
+  assert(preview && preview.visible, label + ": the map preview is not visible");
+  assert(
+    preview.left >= preview.dialog.left - TOLERANCE &&
+      preview.right <= preview.dialog.right + TOLERANCE &&
+      preview.top >= preview.dialog.top - TOLERANCE &&
+      preview.bottom <= preview.dialog.bottom + TOLERANCE,
+    label +
+      ": the map preview is outside the dialog (" +
+      preview.left.toFixed(1) +
+      "," +
+      preview.top.toFixed(1) +
+      " to " +
+      preview.right.toFixed(1) +
+      "," +
+      preview.bottom.toFixed(1) +
+      ")"
+  );
+  assert(
+    preview.title && preview.title.includes(preview.caption),
+    label + ": the preview frame has no coordinate-naming title"
+  );
+  assert(
+    preview.loading === "lazy",
+    label + ": the preview frame is not lazy"
+  );
+  assert(
+    preview.referrerpolicy === "no-referrer",
+    label + ": the preview frame does not suppress the referrer"
+  );
+  assert(
+    preview.tabindex === "-1",
+    label + ": the preview frame can enter the tab order"
+  );
+}
+
 const landscape = { width: 4000, height: 3000 };
 const portrait = { width: 3000, height: 4000 };
 
@@ -546,6 +675,27 @@ try {
     "a map request occurred before the location link was activated: " +
       mapRequests.join(", ")
   );
+
+  const previewAttribute = await page.evaluate(() => ({
+    body: document.body.getAttribute("data-location-preview")
+  }));
+  assert(
+    previewAttribute.body === null,
+    "the default-off fixture advertises a location preview"
+  );
+  await page.locator(".viewer-location a").hover();
+  await page.evaluate(() => document.querySelector(".viewer-location a").focus());
+  await page.waitForTimeout(350);
+  const disabledPreview = await readPreview(page);
+  assert(
+    disabledPreview && !disabledPreview.visible,
+    "the default-off viewer revealed a map preview"
+  );
+  assert(
+    mapRequests.length === 0,
+    "the default-off viewer requested a map: " + mapRequests.join(", ")
+  );
+  await page.evaluate(() => document.querySelector(".viewer-close").focus());
 
   await page.setViewportSize({ width: 375, height: 800 });
   await settle(page);
@@ -941,8 +1091,345 @@ try {
     "video album: original link label is wrong"
   );
 
-  console.log("viewer browser regression passed");
   await context.close();
+
+  async function serveWithRoutes(targetPage, mapLog, shouldBlock) {
+    await targetPage.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return route.continue();
+      }
+      if (
+        url.hostname === "openstreetmap.org" ||
+        url.hostname.endsWith(".openstreetmap.org")
+      ) {
+        mapLog.push(url.href);
+        if (shouldBlock()) {
+          return route.abort();
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: "text/html; charset=utf-8",
+          body: "<!doctype html><title>Map</title><p>Map</p>"
+        });
+      }
+      const entry = routes.get(url.pathname);
+      if (entry) {
+        return route.fulfill({
+          status: 200,
+          contentType: entry.type,
+          body: entry.body
+        });
+      }
+      return route.fulfill({
+        status: 404,
+        contentType: "text/plain; charset=utf-8",
+        body: "not found"
+      });
+    });
+  }
+
+  // The search shell learns the setting from the index it loads, before results
+  // render, and copies it onto the body for the viewer.
+  const searchContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const searchPage = await searchContext.newPage();
+  await serveWithRoutes(searchPage, [], () => false);
+  await searchPage.goto("http://viewer.test/search.html", { waitUntil: "load" });
+  await searchPage.waitForFunction(
+    () => document.body.getAttribute("data-location-preview") === "true"
+  );
+  const propagated = await searchPage.evaluate(() => ({
+    attribute: document.body.getAttribute("data-location-preview"),
+    status: document.getElementById("status").textContent
+  }));
+  assert(
+    propagated.attribute === "true",
+    "the search page did not propagate the index preview setting"
+  );
+  assert(
+    propagated.status !== "Loading catalog…",
+    "the search page did not render results after propagating the setting"
+  );
+  await searchContext.close();
+
+  const previewRequests = [];
+  let blockMaps = false;
+  const previewContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const previewPage = await previewContext.newPage();
+  await serveWithRoutes(previewPage, previewRequests, () => blockMaps);
+  await previewPage.goto("http://viewer.test/preview.html", { waitUntil: "load" });
+  await previewPage.locator("a.tile-link").first().click();
+  await previewPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await settle(previewPage);
+
+  const beforeIntent = await readPreview(previewPage);
+  assert(
+    beforeIntent && !beforeIntent.visible,
+    "the enabled fixture showed a preview before intent"
+  );
+  assert(
+    previewRequests.length === 0,
+    "the enabled fixture requested a map before intent: " +
+      previewRequests.join(", ")
+  );
+
+  await previewPage.locator(".viewer-location a").hover();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await settle(previewPage);
+  const hovered = await readPreview(previewPage);
+  assertPreviewInside("hover preview", hovered);
+  assert(
+    hovered.caption === "52.5200, 13.4050",
+    "the preview caption is wrong: " + hovered.caption
+  );
+  assert(
+    hovered.bottom <= hovered.anchor.top + TOLERANCE,
+    "the preview is not placed above the location link"
+  );
+  assert(
+    previewRequests.length === 1,
+    "hover produced " + previewRequests.length + " map requests instead of one"
+  );
+  const requestUrl = decodeURIComponent(previewRequests[0]);
+  assert(
+    requestUrl.includes("/export/embed.html"),
+    "the preview does not use the official OpenStreetMap embed: " + requestUrl
+  );
+  assert(
+    requestUrl.includes("bbox=13.400024,52.517008,13.409884,52.523008"),
+    "the preview request has no bbox around the point: " + requestUrl
+  );
+  assert(
+    requestUrl.includes("marker=52.520008,13.404954"),
+    "the preview request has no marker at the point: " + requestUrl
+  );
+
+  await previewPage.mouse.move(4, 4);
+  await settle(previewPage);
+  const leftPreview = await readPreview(previewPage);
+  assert(
+    leftPreview && !leftPreview.visible,
+    "the preview did not hide when the pointer left"
+  );
+
+  await previewPage.locator(".viewer-location a").hover();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  assert(
+    previewRequests.length === 1,
+    "a second reveal requested the map again: " + previewRequests.join(", ")
+  );
+
+  await previewPage.mouse.move(4, 4);
+  await settle(previewPage);
+  await previewPage.evaluate(() =>
+    document.querySelector(".viewer-location a").focus()
+  );
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  assert(
+    previewRequests.length === 1,
+    "keyboard focus requested the map a second time: " +
+      previewRequests.join(", ")
+  );
+
+  await previewPage.keyboard.press("Tab");
+  await settle(previewPage);
+  const tabbed = await readPreview(previewPage);
+  assert(
+    tabbed &&
+      tabbed.active &&
+      tabbed.active.startsWith("button.") &&
+      tabbed.active.includes("viewer-"),
+    "Tab entered the preview frame instead of a viewer control: " +
+      (tabbed && tabbed.active)
+  );
+
+  const previewAccessibility = await readDialogAccessibility(previewPage);
+  const previewLink = await previewPage.evaluate(() => {
+    const link = document.querySelector(".viewer-location a");
+    return link
+      ? {
+          label: link.getAttribute("aria-label"),
+          text: (link.textContent || "").trim(),
+          target: link.getAttribute("target")
+        }
+      : null;
+  });
+  assert(
+    previewAccessibility &&
+      previewAccessibility.describedby === "viewer-caption" &&
+      previewAccessibility.description.includes("52.5200, 13.4050"),
+    "the preview changed the dialog description"
+  );
+  assert(
+    previewLink &&
+      previewLink.text === "52.5200, 13.4050" &&
+      previewLink.label.includes("52.5200, 13.4050") &&
+      previewLink.label.includes("OpenStreetMap") &&
+      previewLink.label.includes("new tab") &&
+      previewLink.target === "_blank",
+    "the preview changed the location link's name or target"
+  );
+
+  await previewPage.locator(".viewer-location a").focus();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await previewPage.keyboard.press("Escape");
+  await settle(previewPage);
+  const escapedPreview = await readPreview(previewPage);
+  assert(
+    escapedPreview && !escapedPreview.visible,
+    "Escape did not hide the preview"
+  );
+  assert(
+    (await previewPage.locator(".viewer[open]").count()) === 1,
+    "Escape closed the viewer instead of dismissing the preview"
+  );
+
+  await previewPage.evaluate(() => {
+    const link = document.querySelector(".viewer-location a");
+    link.blur();
+    link.focus();
+  });
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await previewPage.keyboard.press("ArrowRight");
+  await settle(previewPage);
+  const changedItemPreview = await readPreview(previewPage);
+  assert(
+    changedItemPreview && !changedItemPreview.visible,
+    "the preview stayed visible after the item changed"
+  );
+  assert(
+    changedItemPreview.caption !== "52.5200, 13.4050",
+    "the item change did not reach the next item"
+  );
+
+  blockMaps = true;
+  await previewPage.locator(".viewer-location a").hover();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await settle(previewPage);
+  const blockedPreview = await readPreview(previewPage);
+  assertPreviewInside("blocked embed", blockedPreview);
+  assert(
+    blockedPreview.caption === "48.8584, 2.2945",
+    "the blocked embed lost its coordinate fallback: " +
+      blockedPreview.caption
+  );
+  assert(
+    blockedPreview.linkHref &&
+      blockedPreview.linkHref.includes("mlat=48.85837") &&
+      blockedPreview.linkHref.includes("mlon=2.294481"),
+    "the blocked embed changed the location link: " + blockedPreview.linkHref
+  );
+  assert(
+    blockedPreview.height >= 150 && blockedPreview.height <= 200,
+    "the blocked embed changed the popover height: " +
+      blockedPreview.height.toFixed(1)
+  );
+
+  const requestsAfterBlocked = previewRequests.length;
+  await previewPage.locator(".viewer-next").click();
+  await settle(previewPage);
+  const noCoordsPreview = await readPreview(previewPage);
+  assert(
+    noCoordsPreview && !noCoordsPreview.visible,
+    "an item without coordinates revealed a preview"
+  );
+  assert(
+    noCoordsPreview.linkText === "",
+    "an item without coordinates kept the location link text"
+  );
+  assert(
+    previewRequests.length === requestsAfterBlocked,
+    "an item without coordinates requested map data"
+  );
+  await previewPage.locator(".viewer-prev").click();
+  await settle(previewPage);
+
+  await previewPage.setViewportSize({ width: 375, height: 800 });
+  await settle(previewPage);
+  await previewPage.mouse.move(4, 4);
+  await previewPage.locator(".viewer-location a").hover();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await settle(previewPage);
+  const narrowPreview = await readPreview(previewPage);
+  assertPreviewInside("narrow preview", narrowPreview);
+  assert(
+    narrowPreview.left >= -TOLERANCE &&
+      narrowPreview.right <= 375 + TOLERANCE,
+    "the narrow preview extends beyond the viewport"
+  );
+
+  await previewPage.setViewportSize({ width: 1280, height: 800 });
+  await settle(previewPage);
+  await previewPage.keyboard.press("f");
+  await settle(previewPage);
+  await previewPage.mouse.move(4, 4);
+  await previewPage.locator(".viewer-location a").hover();
+  await previewPage.locator(".viewer-map-preview").waitFor({ state: "visible" });
+  await settle(previewPage);
+  const immersivePreview = await readPreview(previewPage);
+  assertPreviewInside("immersive preview", immersivePreview);
+  assert(
+    immersivePreview.dialog.left <= TOLERANCE &&
+      immersivePreview.dialog.right >= 1280 - TOLERANCE,
+    "immersive mode did not fill the viewport"
+  );
+
+  await previewPage.keyboard.press("Escape");
+  await settle(previewPage);
+  await previewPage.keyboard.press("Escape");
+  await settle(previewPage);
+  await previewPage.keyboard.press("Escape");
+  await previewPage.locator(".viewer[open]").waitFor({ state: "detached" });
+  await previewContext.close();
+
+  const touchRequests = [];
+  const touchContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true
+  });
+  const touchPage = await touchContext.newPage();
+  await serveWithRoutes(touchPage, touchRequests, () => false);
+  await touchPage.goto("http://viewer.test/preview.html", { waitUntil: "load" });
+  await touchPage.locator("a.tile-link").first().click();
+  await touchPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  const touchMedia = await touchPage.evaluate(() => ({
+    hoverNone: window.matchMedia("(hover: none)").matches,
+    coarse: window.matchMedia("(pointer: coarse)").matches
+  }));
+  assert(
+    touchMedia.hoverNone || touchMedia.coarse,
+    "the touch context does not emulate a coarse pointer"
+  );
+  await touchPage.evaluate(() => {
+    const link = document.querySelector(".viewer-location a");
+    link.dispatchEvent(
+      new PointerEvent("pointerenter", { pointerType: "touch", bubbles: false })
+    );
+    link.focus();
+  });
+  await touchPage.waitForTimeout(350);
+  const touchPreview = await readPreview(touchPage);
+  assert(
+    touchPreview && !touchPreview.visible,
+    "touch input revealed a map preview"
+  );
+  assert(
+    touchRequests.length === 0,
+    "touch input requested a map: " + touchRequests.join(", ")
+  );
+  assert(
+    touchPreview.linkTarget === "_blank" &&
+      touchPreview.linkHref.includes("mlat=52.520008"),
+    "touch input changed the location link"
+  );
+  await touchContext.close();
+
+  console.log("viewer browser regression passed");
 } catch (error) {
   console.error("viewer browser regression failed: " + (error && error.stack ? error.stack : error));
   process.exitCode = 1;

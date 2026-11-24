@@ -73,6 +73,11 @@ pub struct Cli {
     /// Publish geocoordinates from EXIF and video location tags.
     #[arg(long)]
     pub include_location: bool,
+
+    /// Reveal a map preview when visitors hover or focus published coordinates.
+    /// Requires `--include-location`.
+    #[arg(long)]
+    pub location_preview: bool,
 }
 
 /// Optional TOML configuration shared by both binaries. Values here are
@@ -96,6 +101,9 @@ pub struct FileConfig {
     pub events_only: Option<bool>,
     /// Publish geocoordinates. Ignored by the runtime server.
     pub include_location: Option<bool>,
+    /// Preview published coordinates on hover or focus. Ignored by the runtime
+    /// server, which learns the setting from the published catalog.
+    pub location_preview: Option<bool>,
     /// Socket address for the runtime server. Ignored by the generator.
     pub bind: Option<String>,
     /// Maximum concurrent server media streams. Ignored by the generator.
@@ -149,6 +157,7 @@ pub struct Config {
     pub events_file: Option<PathBuf>,
     pub events_only: bool,
     pub include_location: bool,
+    pub location_preview: bool,
 }
 
 impl Config {
@@ -185,6 +194,7 @@ impl Config {
             events_file: None,
             events_only: false,
             include_location: false,
+            location_preview: false,
         }
     }
 
@@ -230,6 +240,7 @@ impl Config {
         let allow_mount_drop = cli.allow_mount_drop || file.allow_mount_drop.unwrap_or(false);
         let events_only = cli.events_only || file.events_only.unwrap_or(false);
         let include_location = cli.include_location || file.include_location.unwrap_or(false);
+        let location_preview = cli.location_preview || file.location_preview.unwrap_or(false);
 
         let events_file =
             resolve_events_path(cli.events.as_deref().or(file.events_file.as_deref()), &cwd)?;
@@ -250,6 +261,7 @@ impl Config {
             events_file,
             events_only,
             include_location,
+            location_preview,
         };
         config.validate()?;
         Ok(config)
@@ -259,6 +271,11 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.jobs == 0 {
             bail!("--jobs must be at least 1");
+        }
+        if self.location_preview && !self.include_location {
+            bail!(
+                "location_preview requires include_location: enable published coordinates before previewing them"
+            );
         }
         if !self.events_only {
             if !self.media_root.exists() {
@@ -1081,5 +1098,162 @@ mod tests {
             format!("{error:#}").contains("include_location"),
             "{error:#}"
         );
+    }
+
+    #[test]
+    fn location_preview_flag_enables_the_preview() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let cli = Cli {
+            include_location: true,
+            location_preview: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, FileConfig::default(), 2).unwrap();
+        assert!(config.location_preview);
+    }
+
+    #[test]
+    fn location_preview_toml_key_enables_the_preview() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            include_location: Some(true),
+            location_preview: Some(true),
+            ..FileConfig::default()
+        };
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            file,
+            2,
+        )
+        .unwrap();
+        assert!(config.location_preview);
+    }
+
+    #[test]
+    fn location_preview_flag_wins_over_toml_false() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let file = FileConfig {
+            include_location: Some(true),
+            location_preview: Some(false),
+            ..FileConfig::default()
+        };
+        let cli = Cli {
+            location_preview: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let config = Config::resolve(cli, file, 2).unwrap();
+        assert!(config.location_preview);
+    }
+
+    #[test]
+    fn location_preview_defaults_to_off() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let config = Config::resolve(
+            cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            ),
+            FileConfig::default(),
+            2,
+        )
+        .unwrap();
+        assert!(!config.location_preview);
+    }
+
+    #[test]
+    fn location_preview_requires_published_location() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let cli = Cli {
+            location_preview: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        let error = Config::resolve(cli, FileConfig::default(), 2).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("location_preview"), "{message}");
+        assert!(message.contains("include_location"), "{message}");
+    }
+
+    #[test]
+    fn location_preview_and_location_together_validate() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let cli = Cli {
+            include_location: true,
+            location_preview: true,
+            ..cli_with_roots(
+                media.to_str().unwrap(),
+                temp.path().join("data").to_str().unwrap(),
+                temp.path().join("state").to_str().unwrap(),
+            )
+        };
+        Config::resolve(cli, FileConfig::default(), 2).expect("preview with location");
+    }
+
+    #[test]
+    fn server_parses_location_preview_and_ignores_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "media_root = \"./media\"\nlocation_preview = true\nbind = \"0.0.0.0:9090\"\n",
+        )
+        .unwrap();
+        let file = FileConfig::load(Some(&path)).unwrap();
+        assert_eq!(file.location_preview, Some(true));
+        assert_eq!(file.bind.as_deref(), Some("0.0.0.0:9090"));
+    }
+
+    #[test]
+    fn location_preview_rejects_non_boolean_values() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(&path, "location_preview = \"yes\"\n").unwrap();
+        let error = FileConfig::load(Some(&path)).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("location_preview"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn readme_toml_example_parses() {
+        let readme = include_str!("../README.md");
+        let marker = readme
+            .find("Example `media-catalog.toml`:")
+            .expect("README configuration example");
+        let block = &readme[marker..];
+        let start = block.find("```toml").expect("README TOML block") + "```toml".len();
+        let end = start + block[start..].find("```").expect("README block end");
+        let file: FileConfig = toml::from_str(&block[start..end]).expect("README TOML parses");
+        assert_eq!(file.include_location, Some(false));
+        assert_eq!(file.location_preview, Some(false));
     }
 }

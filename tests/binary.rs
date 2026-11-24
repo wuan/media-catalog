@@ -67,6 +67,8 @@ fn help_starts_and_documents_flags() {
         "--quiet",
         "--allow-mount-drop",
         "--events",
+        "--include-location",
+        "--location-preview",
     ] {
         assert!(stdout.contains(flag), "help missing {flag}: {stdout}");
     }
@@ -170,6 +172,33 @@ fn missing_events_flag_path_is_rejected_before_building() {
         stderr.contains("events file not found"),
         "stderr was: {stderr}"
     );
+    assert!(!fixture.data.exists());
+    assert!(!fixture.state_db().exists());
+}
+
+#[test]
+fn location_preview_without_location_is_rejected_before_building() {
+    let fixture = Fixture::new();
+    fixture.write_image("2024/05/a.jpg", 20, 20, 1);
+
+    let output = Command::new(binary())
+        .args([
+            "--media-root",
+            fixture.media.to_str().unwrap(),
+            "--data-root",
+            fixture.data.to_str().unwrap(),
+            "--state-root",
+            fixture.state.to_str().unwrap(),
+            "--location-preview",
+            "--quiet",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("location_preview"), "stderr was: {stderr}");
+    assert!(stderr.contains("include_location"), "stderr was: {stderr}");
     assert!(!fixture.data.exists());
     assert!(!fixture.state_db().exists());
 }

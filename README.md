@@ -138,6 +138,7 @@ against the process working directory, not the directory containing the file.
 | `--quiet` | off | Suppress progress reporting on stderr. |
 | `--allow-mount-drop` | off | Confirm deletions after a sharp item-count drop. |
 | `--include-location` | off | Publish EXIF/video geocoordinates. Default off keeps location out of output. |
+| `--location-preview` | off | Reveal a map preview on hover or keyboard focus of published coordinates; requires location publication. |
 | `--bind <addr>` | `127.0.0.1:8080` | Server listen address; overrides `bind` in TOML. |
 | `--max-streams <n>` | `8` | Server concurrent `/media/` streams; overrides `max_streams` in TOML. |
 | `--config <path>` | `./media-catalog.toml` if present | Shared TOML configuration file. |
@@ -155,14 +156,15 @@ media_url_prefix = "/media"
 thumb_url_prefix = "/thumbs"
 jobs = 4
 include_location = false
+location_preview = false
 bind = "127.0.0.1:8080"
 max_streams = 8
 ```
 
 Both binaries accept every key in this schema. The generator ignores `bind` and
 `max_streams`; the server ignores `state_root`, `events_file`, URL prefixes,
-`jobs`, `include_location`, and generator-only flags. Keys outside the schema are
-rejected.
+`jobs`, `include_location`, `location_preview`, and generator-only flags. Keys
+outside the schema are rejected.
 
 URL prefixes are normalized to a leading slash and no trailing slash. Published
 data is written directly under the data root, and build state lives in the state
@@ -227,9 +229,14 @@ present and otherwise the modification time. EXIF timestamps carry no timezone,
 so they are stored as naive local strings for deterministic, unambiguous sorting.
 The camera model comes from JPEG EXIF `Model` or common ffprobe model tags.
 
-GPS coordinates, location data, serial numbers, and other private EXIF fields
-are never extracted or serialized into JSON or rendered pages. The camera model
-is published because it appears in tile captions, and the file size because the
+GPS coordinates and other private EXIF fields such as serial numbers are never
+extracted or serialized by default. With `--include-location` (or
+`include_location = true`), GPS coordinates and video location tags are published
+and rendered as described below. With `--location-preview` (or
+`location_preview = true`) as well, the viewer requests OpenStreetMap's official
+embed only after a visitor hovers or focuses the coordinates; no map request
+happens on page load, and the request carries no referrer. The camera model is
+published because it appears in tile captions, and the file size because the
 viewer caption shows it. Thumbnails are re-encoded from pixels and therefore
 carry no source metadata.
 
@@ -435,6 +442,7 @@ configured it also includes event metadata ordered by newest start and then slug
 {
   "schema_version": 2,
   "total_items": 2,
+  "location_preview": true,
   "years": [
     {
       "year": 2024,
@@ -517,6 +525,14 @@ items show no size in the viewer.
 Sections publish resolved `start`/`end` ranges rather than bookmark timestamps,
 so the server does not depend on the generator's bookmark derivation rule.
 
+When `location_preview` is enabled, `catalog/index.json` carries
+`"location_preview": true`, and month and event page bodies carry
+`data-location-preview="true"`. The field is omitted when the preview is off, so
+the default index contains no location field. The search page copies the index
+value onto its own body before rendering results. Pages and indexes published
+before the setting existed load as disabled: the viewer makes no map request
+until the visitor activates the location link.
+
 Search (`search.html` + `assets/search.js`, both embedded in the server binary)
 loads the index and all year shards in parallel, then filters by text, type
 (`image`/`video`), year, and month. Filters are reflected in the URL query
@@ -554,8 +570,13 @@ link behavior.
   focal length when known, such as `26 mm · f/1.8 · 1/125 s · ISO 100`; unknown
   values are omitted.
 - **Location:** with `--include-location`, the coordinates appear in the centred
-  segment with a link that opens the point on OpenStreetMap in a new tab; no map
-  request happens until the link is activated.
+  segment with a link that opens the point on OpenStreetMap in a new tab. With
+  `--location-preview` as well (which requires published location), hovering or
+  keyboard focus reveals a small OpenStreetMap preview above the link after a
+  short intent delay. No map request happens before that intent and at most one
+  request is made per item; the preview hides on pointer leave, focus loss,
+  Escape, item change, or viewer close. Touch input keeps the link's tap-to-open
+  behavior and shows no preview.
 - **Navigation:** use the previous and next controls, the Left/Right arrow keys,
   or a horizontal swipe while an image is at fit scale. Arrow keys keep
   navigating while an image is zoomed.

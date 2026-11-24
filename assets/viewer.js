@@ -13,6 +13,13 @@
   var SLIDESHOW_INTERVAL_MS = 5000;
   // Hide immersive chrome after this much pointer, touch, and keyboard idle.
   var IDLE_CHROME_MS = 2500;
+  // Wait for sustained pointer intent before requesting the map embed.
+  var PREVIEW_DELAY_MS = 200;
+  // Latitude span of the preview bbox; longitude is scaled by 1 / cos(lat).
+  var PREVIEW_LAT_SPAN = 0.006;
+  var PREVIEW_WIDTH = 260;
+  var PREVIEW_HEIGHT = 184;
+  var PREVIEW_GAP = 8;
   var SVG_NS = "http://www.w3.org/2000/svg";
 
   // Icon geometry is a vendored subset of Lucide (ISC; the Feather-derived
@@ -286,7 +293,10 @@
     slideshowTimer: null,
     immersive: false,
     idleTimer: null,
-    chromeHidden: false
+    chromeHidden: false,
+    previewItem: null,
+    previewTimer: null,
+    previewShown: false
   };
 
   var dialog = null;
@@ -298,6 +308,9 @@
   var meta = null;
   var location = null;
   var locationLink = null;
+  var preview = null;
+  var previewFrame = null;
+  var previewCaption = null;
   var error = null;
   var prevButton = null;
   var nextButton = null;
@@ -410,10 +423,25 @@
     bottom.appendChild(controls);
     bottom.appendChild(caption);
 
+    preview = document.createElement("div");
+    preview.className = "viewer-map-preview";
+    preview.hidden = true;
+    previewFrame = document.createElement("iframe");
+    previewFrame.className = "viewer-map-frame";
+    previewFrame.setAttribute("loading", "lazy");
+    previewFrame.setAttribute("referrerpolicy", "no-referrer");
+    previewFrame.setAttribute("tabindex", "-1");
+    previewFrame.setAttribute("title", "Map preview");
+    previewCaption = document.createElement("p");
+    previewCaption.className = "viewer-map-caption";
+    preview.appendChild(previewFrame);
+    preview.appendChild(previewCaption);
+
     frame.appendChild(top);
     frame.appendChild(stage);
     frame.appendChild(bottom);
     dialog.appendChild(frame);
+    dialog.appendChild(preview);
     document.body.appendChild(dialog);
 
     dialog.addEventListener("click", function (event) {
@@ -423,6 +451,10 @@
     });
     dialog.addEventListener("cancel", function (event) {
       event.preventDefault();
+      if (state.previewShown) {
+        hidePreview();
+        return;
+      }
       if (state.immersive) {
         setImmersive(false);
       } else {
@@ -463,6 +495,15 @@
         stage.focus();
       }
     });
+    locationLink.addEventListener("pointerenter", function (event) {
+      if (event.pointerType && event.pointerType !== "mouse") {
+        return;
+      }
+      schedulePreview();
+    });
+    locationLink.addEventListener("pointerleave", hidePreview);
+    locationLink.addEventListener("focus", showPreview);
+    locationLink.addEventListener("blur", hidePreview);
 
     stage.setAttribute("tabindex", "-1");
     stage.addEventListener("pointerdown", onPointerDown);
@@ -522,6 +563,7 @@
       applyTransform();
       updatePreviewSize();
     }
+    positionPreview();
   }
 
   function clearChromeTimer() {
@@ -552,6 +594,7 @@
     }
     dialog.classList.add("is-chrome-hidden");
     state.chromeHidden = true;
+    hidePreview();
   }
 
   function revealChrome() {
@@ -945,11 +988,167 @@
     );
   }
 
+  // Coarse pointers and touch input keep today's link behavior without a
+  // hover surface.
+  function previewSupported() {
+    if (typeof window.matchMedia !== "function") {
+      return false;
+    }
+    if (window.matchMedia("(hover: none)").matches) {
+      return false;
+    }
+    if (window.matchMedia("(pointer: coarse)").matches) {
+      return false;
+    }
+    return true;
+  }
+
+  // Read the propagated deployment setting lazily at intent time so the search
+  // page's asynchronous index load cannot race the first preview.
+  function previewEnabled() {
+    return (
+      document.body &&
+      document.body.getAttribute("data-location-preview") === "true"
+    );
+  }
+
+  function previewBbox(latitude, longitude) {
+    var latSpan = PREVIEW_LAT_SPAN;
+    var cos = Math.cos((latitude * Math.PI) / 180);
+    if (!isFinite(cos) || Math.abs(cos) < 0.01) {
+      cos = 0.01;
+    }
+    var lonSpan = latSpan / Math.abs(cos);
+    return [
+      longitude - lonSpan / 2,
+      latitude - latSpan / 2,
+      longitude + lonSpan / 2,
+      latitude + latSpan / 2
+    ]
+      .map(function (value) {
+        return Number(value).toFixed(6);
+      })
+      .join(",");
+  }
+
+  function previewUrl(latitude, longitude) {
+    return (
+      "https://www.openstreetmap.org/export/embed.html?bbox=" +
+      previewBbox(latitude, longitude) +
+      "&layer=mapnik&marker=" +
+      latitude +
+      "," +
+      longitude
+    );
+  }
+
+  function previewTitle(latitude, longitude) {
+    return "Map preview of " + formatCoordinates(latitude, longitude);
+  }
+
+  function previewAvailable(item) {
+    return Boolean(
+      item && previewEnabled() && previewSupported() && hasLocation(item)
+    );
+  }
+
+  function cancelPreviewTimer() {
+    if (state.previewTimer) {
+      clearTimeout(state.previewTimer);
+      state.previewTimer = null;
+    }
+  }
+
+  function schedulePreview() {
+    cancelPreviewTimer();
+    if (!state.open || !previewAvailable(state.items[state.index])) {
+      return;
+    }
+    state.previewTimer = window.setTimeout(function () {
+      state.previewTimer = null;
+      showPreview();
+    }, PREVIEW_DELAY_MS);
+  }
+
+  function showPreview() {
+    cancelPreviewTimer();
+    if (!state.open || !dialog) {
+      return;
+    }
+    var item = state.items[state.index];
+    if (!previewAvailable(item)) {
+      hidePreview();
+      return;
+    }
+    previewCaption.textContent = formatCoordinates(item.latitude, item.longitude);
+    previewFrame.title = previewTitle(item.latitude, item.longitude);
+    if (state.previewItem !== item.path) {
+      // One frame per item: a second reveal of the same item reuses it.
+      state.previewItem = item.path;
+      previewFrame.src = previewUrl(item.latitude, item.longitude);
+    }
+    preview.hidden = false;
+    state.previewShown = true;
+    positionPreview();
+  }
+
+  function hidePreview() {
+    cancelPreviewTimer();
+    state.previewShown = false;
+    if (preview) {
+      preview.hidden = true;
+    }
+  }
+
+  // Discard the frame when the item changes or the viewer closes, so a later
+  // item starts with its own request budget.
+  function teardownPreview() {
+    hidePreview();
+    state.previewItem = null;
+    if (previewFrame) {
+      previewFrame.removeAttribute("src");
+      previewFrame.title = "Map preview";
+    }
+    if (previewCaption) {
+      previewCaption.textContent = "";
+    }
+  }
+
+  function positionPreview() {
+    if (!preview || preview.hidden || !locationLink || !dialog) {
+      return;
+    }
+    var anchor = locationLink.getBoundingClientRect();
+    var bounds = dialog.getBoundingClientRect();
+    if (!anchor.width || !bounds.width) {
+      return;
+    }
+    var width = preview.offsetWidth || PREVIEW_WIDTH;
+    var height = preview.offsetHeight || PREVIEW_HEIGHT;
+    var minLeft = bounds.left + PREVIEW_GAP;
+    var maxLeft = bounds.right - width - PREVIEW_GAP;
+    var left =
+      maxLeft >= minLeft
+        ? clamp(anchor.left + (anchor.width - width) / 2, minLeft, maxLeft)
+        : bounds.left + PREVIEW_GAP;
+    var minTop = bounds.top + PREVIEW_GAP;
+    var maxTop = bounds.bottom - height - PREVIEW_GAP;
+    var top = anchor.top - height - PREVIEW_GAP;
+    if (top < minTop) {
+      // Flip below the link when there is no room above.
+      top = anchor.bottom + PREVIEW_GAP;
+    }
+    top = maxTop >= minTop ? clamp(top, minTop, maxTop) : minTop;
+    preview.style.left = Math.round(left) + "px";
+    preview.style.top = Math.round(top) + "px";
+  }
+
   function showItem() {
     var item = state.items[state.index];
     resetZoom();
     cancelOriginal();
     teardownVideo();
+    teardownPreview();
     error.hidden = true;
 
     // Fill the chrome first so the stage measurement describes the layout that
@@ -1445,6 +1644,7 @@
     var lastItem = state.items[state.index];
     cancelOriginal();
     teardownVideo();
+    teardownPreview();
     pauseSlideshow();
     state.open = false;
     setImmersive(false);
@@ -1619,6 +1819,7 @@
       }
     });
     window.addEventListener("resize", function () {
+      positionPreview();
       if (!state.open || state.mediaKind !== "image") {
         return;
       }
@@ -1652,6 +1853,7 @@
     ORIGINAL_DELAY_MS: ORIGINAL_DELAY_MS,
     SLIDESHOW_INTERVAL_MS: SLIDESHOW_INTERVAL_MS,
     IDLE_CHROME_MS: IDLE_CHROME_MS,
+    PREVIEW_DELAY_MS: PREVIEW_DELAY_MS,
     clamp: clamp,
     clampZoom: clampZoom,
     clampPan: clampPan,
@@ -1673,6 +1875,9 @@
     formatCoordinates: formatCoordinates,
     locationUrl: locationUrl,
     locationLabel: locationLabel,
+    previewBbox: previewBbox,
+    previewUrl: previewUrl,
+    previewTitle: previewTitle,
     fittedBox: fittedBox,
     placeholderBox: placeholderBox
   };

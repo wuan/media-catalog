@@ -20,10 +20,17 @@ pub const JSON_SCHEMA_VERSION: u32 = 2;
 pub struct IndexFile {
     pub schema_version: u32,
     pub total_items: usize,
+    /// Whether the deployment offers a location preview. Omitted when off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub location_preview: bool,
     pub years: Vec<IndexYear>,
     /// Authored events. Omitted for catalogs without events.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<IndexEvent>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +277,7 @@ pub fn render_json(catalog: &Catalog) -> Result<JsonOutput> {
         total_items: catalog.item_count,
         years: index_years,
         events: catalog.events.iter().map(IndexEvent::from).collect(),
+        location_preview: catalog.location_preview,
     })?;
 
     Ok(JsonOutput { index, shards })
@@ -421,6 +429,7 @@ pub fn catalog_from_parts(index: &IndexFile, shards: &BTreeMap<i32, YearShard>) 
         years,
         item_count: total,
         events: Vec::new(),
+        location_preview: index.location_preview,
     };
 
     let definitions = index
@@ -647,6 +656,44 @@ mod tests {
         );
         for forbidden in ["gps", "location", "latitude", "longitude", "serial"] {
             assert!(!all.to_ascii_lowercase().contains(forbidden));
+        }
+    }
+
+    #[test]
+    fn location_preview_field_follows_the_setting() {
+        let mut catalog = catalog();
+        let off = render_json(&catalog).unwrap();
+        assert!(!off.index.contains("\"location_preview\""));
+        assert!(!off.index.to_ascii_lowercase().contains("location"));
+
+        catalog.location_preview = true;
+        let on = render_json(&catalog).unwrap();
+        assert!(on.index.contains("\"location_preview\": true"));
+        for shard in on.shards.values() {
+            assert!(!shard.contains("\"location_preview\""));
+            assert!(!shard.contains("\"latitude\""));
+            assert!(!shard.contains("\"longitude\""));
+        }
+
+        let parsed = catalog_from_json(&on.index, &on.shards).unwrap();
+        assert!(parsed.location_preview);
+        let parsed_off = catalog_from_json(&off.index, &off.shards).unwrap();
+        assert!(!parsed_off.location_preview);
+    }
+
+    #[test]
+    fn location_preview_does_not_publish_coordinates() {
+        let mut catalog = catalog();
+        catalog.location_preview = true;
+        let output = render_json(&catalog).unwrap();
+        assert!(output.index.contains("\"location_preview\": true"));
+        let all = format!(
+            "{}{}",
+            output.index,
+            output.shards.values().cloned().collect::<String>()
+        );
+        for forbidden in ["\"latitude\"", "\"longitude\"", "gps", "serial"] {
+            assert!(!all.to_ascii_lowercase().contains(forbidden), "{forbidden}");
         }
     }
 
@@ -916,6 +963,7 @@ mod tests {
         let json_start = json_section.find("```json").expect("README JSON block") + 7;
         let json_end = json_start + json_section[json_start..].find("```").expect("block end");
         let index = parse_index(&json_section[json_start..json_end]).unwrap();
+        assert!(index.location_preview);
 
         let toml_start = readme.find("[[events]]").expect("README event example");
         let toml_end = toml_start + readme[toml_start..].find("```").expect("block end");

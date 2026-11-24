@@ -6,7 +6,7 @@
   <title>{{ title }} · Media catalog</title>
   <link rel="stylesheet" href="/assets/site.css">
 </head>
-<body id="top">
+<body id="top"{% if location_preview %} data-location-preview="true"{% endif %}>
   <header class="site-header">
     <a class="brand" href="/">Media catalog</a>
     <nav><a href="/search.html">Search</a></nav>

@@ -492,6 +492,7 @@ pub fn run_with_config(config: Config) -> Result<RunOutcome> {
 
     let mut catalog =
         model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
+    catalog.location_preview = config.location_preview;
     events::attach_events(&mut catalog, event_definitions)?;
 
     progress.phase("Publishing JSON catalog");
@@ -636,6 +637,7 @@ fn run_events_only(
 
     let mut catalog =
         model::build_catalog(inputs, &config.media_url_prefix, &config.thumb_url_prefix);
+    catalog.location_preview = config.location_preview;
     events::attach_events(&mut catalog, event_definitions.to_vec())?;
 
     let mut summary = RunSummary {
