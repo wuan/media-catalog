@@ -587,13 +587,17 @@ link behavior.
   returns on pointer movement, a tap, the wheel, a key press, or keyboard focus
   without resizing the stage. Escape leaves immersive mode first and closes the
   viewer on the next press.
-- **Slideshow:** press the play control or `s` to advance through the album every
-  5 seconds. Playback never starts on its own, stops on the last item, and
-  restarts from the first item when play is pressed on the last item. Manual
-  navigation, zoom, pan, opening the original, or switching tabs pauses it until
-  play is pressed again. A video pauses playback and waits for the visitor;
-  pressing play on a video advances to the next item and resumes there. Closing
-  the viewer clears the timer, so reopening always starts paused.
+- **Slideshow:** press the play control or `s` to advance through image items
+  every 5 seconds after the current slide's original paints. Playback never
+  starts on its own, skips videos, stops at the last image, and restarts from
+  the first image when play is pressed on the last item. The next image's
+  original is prefetched during the dwell and adopted when it decodes, so a
+  transition never paints a thumbnail or blanks the stage. Manual navigation,
+  zoom, pan, opening the original, or switching tabs pauses playback until play
+  is pressed again. If an original fails three attempts (10 seconds per attempt
+  with short backoff and cache-busting retries), playback stops and opens the
+  failed item paused with its thumbnail, caption, error note, and original
+  link. Closing the viewer clears every timer, so reopening always starts paused.
 - **Images:** the thumbnail stays visible until the original has decoded, then
   the decoded original replaces it without a blank frame; each newly opened
   item starts at fit scale, and pinch, wheel, double-tap/double-click, and
@@ -639,12 +643,18 @@ Browser verification checklist for the video and focus paths:
 - Press Escape in immersive mode and confirm the viewer stays open; press Escape
   again and confirm it closes.
 - Start the slideshow with the play control and `s`; confirm it advances every
-  5 seconds, stops on the last item, and restarts from the first when play is
-  pressed there.
+  5 seconds only after each next original decodes, never shows a thumbnail or
+  blank frame between slides, stops at the last image, and restarts from the
+  first image when play is pressed there.
+- With a mixed album, let the slideshow advance across a video; confirm it skips
+  the video without pausing and lands on the next image. Open a video manually
+  and start playback to confirm it moves to the next image.
+- Use a throttled or failing image route and confirm each slide's original is
+  requested at most three times, playback stops when retries are exhausted, and
+  the failed item opens paused with its thumbnail, error note, and original
+  link while no timer advances it.
 - Navigate manually or zoom during playback and confirm it pauses; switch tabs
   and confirm it stays paused until play is pressed.
-- With a mixed album, let the slideshow reach a video and confirm it pauses
-  without autoplaying; press play and confirm it advances and resumes.
 - Close the viewer mid-playback and reopen it from a tile and from `?item=`;
   confirm it starts paused and no timer fires.
 - Use only the keyboard: Tab to the play and immersive controls, confirm their

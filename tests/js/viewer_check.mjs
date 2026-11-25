@@ -13,6 +13,25 @@ if (!api) {
 }
 
 const album = [{ path: "2024/05/a.jpg" }, { path: "2024/05/b.jpg" }];
+const slideshowAlbum = [
+  { path: "2024/05/a.jpg", kind: "image" },
+  { path: "fixture/clip.mp4", kind: "video" },
+  { path: "2024/05/b.jpg", kind: "image" },
+  { path: "fixture/clip2.mp4", kind: "video" }
+];
+const slideshowVideoTail = [
+  { path: "2024/05/a.jpg", kind: "image" },
+  { path: "2024/05/b.jpg", kind: "image" },
+  { path: "fixture/clip.mp4", kind: "video" }
+];
+const slideshowSingleImageAlbum = [
+  { path: "2024/05/a.jpg", kind: "image" },
+  { path: "fixture/clip.mp4", kind: "video" }
+];
+const slideshowNoImageAlbum = [
+  { path: "fixture/clip.mp4", kind: "video" },
+  { path: "fixture/clip2.mp4", kind: "video" }
+];
 
 const fakeTile = {
   getAttribute(name) {
@@ -108,12 +127,24 @@ const result = {
   previous: api.nextIndex(1, -1, 2),
   beforeFirst: api.nextIndex(0, -1, 2),
   afterLast: api.nextIndex(1, 1, 2),
-  slideshowAdvance: api.slideshowTarget(0, 3, false),
-  slideshowAtLast: api.slideshowTarget(2, 3, false),
-  slideshowRestart: api.slideshowTarget(2, 3, true),
-  slideshowAdvanceFromMiddle: api.slideshowTarget(1, 3, false),
-  slideshowResume: api.slideshowTarget(1, 3, true),
-  slideshowSingle: api.slideshowTarget(0, 1, true),
+  slideshowStartOnImage: api.slideshowTarget(slideshowAlbum, 0, true),
+  slideshowStartOnMiddleImage: api.slideshowTarget(slideshowAlbum, 2, true),
+  slideshowAdvanceSkipsVideos: api.slideshowTarget(slideshowAlbum, 0, false),
+  slideshowAdvanceStops: api.slideshowTarget(slideshowAlbum, 2, false),
+  slideshowStartOnVideo: api.slideshowTarget(slideshowAlbum, 1, true),
+  slideshowStartOnLastItem: api.slideshowTarget(slideshowAlbum, 3, true),
+  slideshowStartOnVideoWithoutImageAfter: api.slideshowTarget(
+    slideshowVideoTail,
+    2,
+    true
+  ),
+  slideshowAdvanceFromLastImage: api.slideshowTarget(slideshowVideoTail, 1, false),
+  slideshowSingleImage: api.slideshowTarget(slideshowSingleImageAlbum, 0, true),
+  slideshowNoImages: api.slideshowTarget(slideshowNoImageAlbum, 0, true),
+  slideshowFirstImage: api.firstImageIndex(slideshowAlbum, 0),
+  slideshowFirstImageAfterVideo: api.firstImageIndex(slideshowAlbum, 1),
+  slideshowFirstImageMissing: api.firstImageIndex(slideshowNoImageAlbum, 0),
+  slideshowImageCount: api.imageItemCount(slideshowAlbum),
   slideshowInterval: api.SLIDESHOW_INTERVAL_MS,
   idleChrome: api.IDLE_CHROME_MS,
   zoomLow: api.clampZoom(0.5),

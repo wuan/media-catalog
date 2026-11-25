@@ -128,7 +128,7 @@ The viewer SHALL provide an immersive mode that fills the window, lays the stage
 
 ### Requirement: Present images with pan and zoom
 
-The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL defer requesting the original until the item has been shown for a short delay, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents. The viewer SHALL keep the placeholder aligned with the current stage whenever the stage layout changes while the preview is visible.
+The viewer SHALL display images at their original resolution with an immediate thumbnail preview, SHALL defer requesting the original until the item has been shown for a short delay, SHALL fit each newly opened image to the viewport, and SHALL support pan and zoom gestures. While the thumbnail preview is shown, the viewer SHALL size the square 512x512 center-crop placeholder to the shorter edge of the original image's fitted box and center it, so the placeholder covers exactly the region of the original that the crop represents. The viewer SHALL keep the placeholder aligned with the current stage whenever the stage layout changes while the preview is visible. Slideshow playback is exempt from the thumbnail preview: an item already on screen remains visible while the slideshow prepares its next item.
 
 #### Scenario: Original image
 - **WHEN** an image item opens
@@ -174,6 +174,10 @@ The viewer SHALL display images at their original resolution with an immediate t
 - **WHEN** the browser viewport changes size while a thumbnail preview is visible
 - **THEN** the placeholder is resized from the new stage so it remains centered and equal to the shorter edge of the fitted box
 
+#### Scenario: Slideshow slide presentation
+- **WHEN** slideshow playback opens an image item
+- **THEN** no thumbnail preview is painted for that item and it becomes visible only when its original image has decoded
+
 #### Scenario: Zoom reset
 - **WHEN** the viewer moves to a different item
 - **THEN** the new image opens at fit scale regardless of the previous item's zoom or pan
@@ -200,14 +204,14 @@ The viewer SHALL display images at their original resolution with an immediate t
 
 ### Requirement: Show the preview until the original is ready
 
-The viewer SHALL keep the thumbnail preview visible until the original image is decoded and ready to paint, and SHALL NOT paint a frame in which the stage shows neither the preview nor the original.
+The viewer SHALL keep the thumbnail preview visible until the original image is decoded and ready to paint outside slideshow playback, and SHALL NOT paint a frame in which the stage shows neither the preview nor the original. During slideshow playback the viewer SHALL keep the current image visible until the next item's original is decoded.
 
 #### Scenario: Original decoding after the preview
-- **WHEN** the original image data has arrived but the image is not yet decoded
+- **WHEN** the original image data has arrived but the image is not yet decoded outside slideshow playback
 - **THEN** the viewer continues to show the thumbnail preview and the stage never shows an empty frame
 
 #### Scenario: Original becomes paintable
-- **WHEN** the original image is decoded
+- **WHEN** the original image is decoded outside slideshow playback
 - **THEN** the viewer replaces the thumbnail with the original in a single paint, with no blank frame in between
 
 #### Scenario: Navigation during decode
@@ -215,8 +219,12 @@ The viewer SHALL keep the thumbnail preview visible until the original image is 
 - **THEN** the viewer keeps showing the new item's preview and does not install the previous item's original
 
 #### Scenario: Original fails to decode
-- **WHEN** the original cannot be loaded or decoded
+- **WHEN** the original cannot be loaded or decoded outside slideshow playback
 - **THEN** the thumbnail preview remains visible and the viewer does not show a blank stage
+
+#### Scenario: Slideshow transition holds the current image
+- **WHEN** slideshow playback is about to show its next image before that image's original has decoded
+- **THEN** the image currently on screen remains painted and the next image appears only once it is ready
 
 ### Requirement: Play videos inline
 
@@ -242,25 +250,37 @@ The viewer SHALL play video items inline with native playback controls, the thum
 - **WHEN** a video cannot be played by the browser
 - **THEN** the viewer keeps the item caption and a direct link to the original available
 
-### Requirement: Run an automatic slideshow
+### Requirement: Run a slideshow over decoded originals
 
-The viewer SHALL advance through the album automatically every 5 seconds after an explicit start, provide a pause control, stop at the album boundaries, and pause instead of advancing over video items.
+The viewer SHALL advance through the album's image items automatically every 5 seconds after an explicit start, provide a pause control, skip video items, stop at the album boundaries, and wait for the next image's original to decode before changing the displayed slide. The 5-second dwell SHALL start when a slide's original is painted.
 
 #### Scenario: Explicit start only
 - **WHEN** the viewer opens an album
 - **THEN** no slideshow runs until the visitor activates the play control or the slideshow key
 
 #### Scenario: Advancing images
-- **WHEN** the slideshow is playing on an image item and 5 seconds pass
-- **THEN** the viewer shows the next album item and updates the album URL as manual navigation does
+- **WHEN** the slideshow is playing on an image item, that image has been painted, and 5 seconds have passed
+- **THEN** the viewer shows the next image item and updates the album URL as manual navigation does
 
-#### Scenario: Stop at the last item
-- **WHEN** the slideshow advances onto the last album item
-- **THEN** playback stops there and leaves the last item visible
+#### Scenario: Advance waits for the decoded original
+- **WHEN** the dwell ends before the next image item's original has decoded
+- **THEN** the current image stays on screen and the slideshow advances only once the next original is ready to paint
+
+#### Scenario: Prefetch the next image
+- **WHEN** an image slide is painted during playback
+- **THEN** the viewer requests the next image item's original in the background unless the browser requests reduced data usage, so the next slide can appear without another wait
+
+#### Scenario: Stop at the last image
+- **WHEN** the slideshow advances onto the last image item in the album
+- **THEN** playback stops there and leaves that image visible
 
 #### Scenario: Restart from the last item
 - **WHEN** the visitor starts the slideshow while the last album item is open
-- **THEN** playback restarts from the first album item
+- **THEN** playback restarts from the first image item
+
+#### Scenario: Start on a video item
+- **WHEN** the visitor starts the slideshow while a video item is open
+- **THEN** playback moves to the next image item, or to the first image item when no image follows
 
 #### Scenario: Pause control
 - **WHEN** the slideshow is playing and the visitor activates the pause control
@@ -270,21 +290,33 @@ The viewer SHALL advance through the album automatically every 5 seconds after a
 - **WHEN** the slideshow is playing and the visitor navigates manually, zooms, pans, opens the original, or the document becomes hidden
 - **THEN** playback pauses and does not resume until the visitor explicitly starts it again
 
-#### Scenario: Video pauses the slideshow
-- **WHEN** the slideshow reaches a video item
-- **THEN** playback pauses, the video is shown with its poster and native controls, and it does not autoplay
-
-#### Scenario: Play continues past a video
-- **WHEN** the slideshow is paused on a video item and the visitor activates play
-- **THEN** the viewer advances to the next item and resumes automatic playback from there
+#### Scenario: Video items are skipped
+- **WHEN** the slideshow would advance onto a video item
+- **THEN** the viewer skips it, never shows it during playback, and advances to the next image item
 
 #### Scenario: Closing stops playback
 - **WHEN** the viewer closes while the slideshow is playing
 - **THEN** the slideshow stops, and reopening the viewer starts paused on the requested item
 
-#### Scenario: Single-item album
-- **WHEN** the album contains only one item and the visitor starts the slideshow
+#### Scenario: Fewer than two image items
+- **WHEN** the album contains fewer than two image items and the visitor starts the slideshow
 - **THEN** playback does not advance and no timer keeps running
+
+### Requirement: Bound retries for slideshow originals
+
+The viewer SHALL retry a slideshow slide's original image a limited number of times before treating the item as failed, using a timeout for each attempt so a stalled request cannot block playback indefinitely.
+
+#### Scenario: Retry a failed original
+- **WHEN** a slideshow slide's original fails to load or decode, or an attempt exceeds its timeout
+- **THEN** the viewer retries the original up to 3 attempts with a timeout of 10 seconds per attempt and short backoff between attempts
+
+#### Scenario: Slideshow fails after retries
+- **WHEN** every retry attempt for a slideshow slide fails
+- **THEN** playback stops and the failed item opens in the paused viewer with its thumbnail preview, caption, error note, and original link
+
+#### Scenario: Failure keeps the stage painted
+- **WHEN** a slideshow slide fails after retries while a previous image is on screen
+- **THEN** the previous image remains visible until the failed item opens, and the stage never shows a blank frame
 
 ### Requirement: Preserve the no-JavaScript fallback
 

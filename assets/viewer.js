@@ -11,6 +11,15 @@
   // arrow key to browse only loads thumbnails for the items passed over.
   var ORIGINAL_DELAY_MS = 200;
   var SLIDESHOW_INTERVAL_MS = 5000;
+  // Slideshow originals get bounded retries so a stalled request cannot hold
+  // playback forever; retries carry a cache-buster to force a fresh download.
+  var SLIDESHOW_ATTEMPT_TIMEOUT_MS = 10000;
+  var SLIDESHOW_ATTEMPT_LIMIT = 3;
+  var SLIDESHOW_RETRY_DELAYS_MS = [500, 1000];
+  var ERROR_DEFAULT =
+    "This item cannot be played here. Use the original link to open it.";
+  var ERROR_IMAGE =
+    "This image could not be loaded. Use the original link to open it.";
   // Hide immersive chrome after this much pointer, touch, and keyboard idle.
   var IDLE_CHROME_MS = 2500;
   // Wait for sustained pointer intent before requesting the map embed.
@@ -143,18 +152,43 @@
     return next < 0 || next >= length ? -1 : next;
   }
 
-  // Pure slideshow target: normal advance, -1 at the last item, or the first
-  // item when playback is (re)started from the last item. Lengths below two
-  // cannot advance, so the slideshow never sets a timer for them.
-  function slideshowTarget(index, length, restarting) {
-    if (index < 0 || length < 2) {
+  function firstImageIndex(items, start) {
+    for (var cursor = start || 0; cursor < items.length; cursor += 1) {
+      if (items[cursor].kind === "image") {
+        return cursor;
+      }
+    }
+    return -1;
+  }
+
+  function imageItemCount(items) {
+    var count = 0;
+    for (var cursor = 0; cursor < items.length; cursor += 1) {
+      if (items[cursor].kind === "image") {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  // Pure slideshow target over album order: playback visits only image items.
+  // Starting keeps the image already open, moves off a video to the next image
+  // (or the first image when none follows), and restarts from the first image
+  // when the last album item is open. Advancing returns -1 when no image
+  // remains. Albums with fewer than two images never run a timer.
+  function slideshowTarget(items, index, restarting) {
+    if (index < 0 || index >= items.length || imageItemCount(items) < 2) {
       return -1;
     }
-    if (restarting) {
-      return index >= length - 1 ? 0 : index;
+    var start = restarting ? index : index + 1;
+    if (restarting && index === items.length - 1) {
+      return firstImageIndex(items);
     }
-    var next = index + 1;
-    return next < length ? next : -1;
+    var target = firstImageIndex(items, start);
+    if (target !== -1) {
+      return target;
+    }
+    return restarting ? firstImageIndex(items) : -1;
   }
 
   function swipeThreshold(stageWidth) {
@@ -291,6 +325,8 @@
     originalLoader: null,
     playing: false,
     slideshowTimer: null,
+    slideshowLoad: null,
+    slideshowPrefetch: null,
     immersive: false,
     idleTimer: null,
     chromeHidden: false,
@@ -641,34 +677,72 @@
     if (!state.open) {
       return;
     }
-    var item = state.items[state.index];
-    var target = slideshowTarget(
-      state.index,
-      state.items.length,
-      !item || item.kind !== "video"
-    );
+    var target = slideshowTarget(state.items, state.index, true);
     if (target === -1) {
       pauseSlideshow();
       return;
     }
-    if (target !== state.index) {
-      goTo(target);
-    }
-    if (state.items[state.index].kind === "video") {
-      pauseSlideshow();
-      return;
-    }
+    cancelSlideshowPrep();
+    // The paused path may still hold a delayed original request; playback
+    // owns the original loading from here.
+    cancelOriginal();
     state.playing = true;
     updatePlayControl();
     setPositionLive(false);
-    scheduleSlideshow();
+
+    var item = state.items[state.index];
+    if (target === state.index && currentImagePainted(item)) {
+      scheduleSlideshow();
+      prefetchSlideshowImage();
+      return;
+    }
+    prepareSlideshowSlide(target);
   }
 
   function pauseSlideshow() {
     state.playing = false;
-    clearSlideshowTimer();
+    cancelSlideshowPrep();
     updatePlayControl();
     setPositionLive(true);
+  }
+
+  function cancelSlideshowPrep() {
+    clearSlideshowTimer();
+    cancelSlideshowLoad();
+    cancelSlideshowPrefetch();
+  }
+
+  function cancelSlideshowLoad() {
+    var entry = state.slideshowLoad;
+    state.slideshowLoad = null;
+    cancelSlideshowEntry(entry);
+  }
+
+  function cancelSlideshowPrefetch() {
+    var entry = state.slideshowPrefetch;
+    state.slideshowPrefetch = null;
+    cancelSlideshowEntry(entry);
+  }
+
+  function cancelSlideshowEntry(entry) {
+    if (!entry || entry.finished) {
+      return;
+    }
+    entry.finished = true;
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    if (entry.loader) {
+      releaseImageLoader(entry.loader);
+      entry.loader = null;
+    }
+  }
+
+  function releaseImageLoader(image) {
+    image.onload = null;
+    image.onerror = null;
+    image.removeAttribute("src");
   }
 
   function scheduleSlideshow() {
@@ -694,17 +768,300 @@
     if (!state.playing || !state.open) {
       return;
     }
-    var next = slideshowTarget(state.index, state.items.length, false);
+    var next = slideshowTarget(state.items, state.index, false);
     if (next === -1) {
       pauseSlideshow();
       return;
     }
-    goTo(next);
-    if (state.items[next].kind === "video") {
-      pauseSlideshow();
+    prepareSlideshowSlide(next);
+  }
+
+  function currentImagePainted(item) {
+    var media = state.media;
+    if (state.mediaKind !== "image" || !media) {
+      return false;
+    }
+    if (media.classList.contains("is-original")) {
+      return true;
+    }
+    return !item.thumbUrl && media.complete && media.naturalWidth > 0;
+  }
+
+  function slideshowAttemptUrl(url, attempt) {
+    if (attempt <= 1) {
+      return url;
+    }
+    return (
+      url +
+      (url.indexOf("?") === -1 ? "?" : "&") +
+      "slideshow-retry=" +
+      attempt
+    );
+  }
+
+  // One original request with a hard per-attempt timeout. Failures and decode
+  // rejections walk the retry ladder before the slide is treated as failed.
+  function beginSlideshowLoad(index, options) {
+    var entry = {
+      index: index,
+      attempt: 0,
+      loader: null,
+      timer: null,
+      finished: false,
+      image: null,
+      prefetch: Boolean(options && options.prefetch),
+      onReady: (options && options.onReady) || null,
+      onFailed: (options && options.onFailed) || null
+    };
+    attemptSlideshowLoad(entry);
+    return entry;
+  }
+
+  function attemptSlideshowLoad(entry) {
+    if (entry.finished) {
       return;
     }
+    var item = state.items[entry.index];
+    if (!item) {
+      finishSlideshowLoad(entry, null);
+      return;
+    }
+    entry.attempt += 1;
+    var loader = new Image();
+    var settled = false;
+    entry.loader = loader;
+
+    function settle(success) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+        entry.timer = null;
+      }
+      if (entry.loader === loader) {
+        entry.loader = null;
+      }
+      if (!success) {
+        releaseImageLoader(loader);
+        retrySlideshowLoad(entry);
+        return;
+      }
+      decodeSlideshowImage(entry, loader);
+    }
+
+    loader.onload = function () {
+      settle(true);
+    };
+    loader.onerror = function () {
+      settle(false);
+    };
+    entry.timer = window.setTimeout(function () {
+      settle(false);
+    }, SLIDESHOW_ATTEMPT_TIMEOUT_MS);
+    loader.src = slideshowAttemptUrl(item.mediaUrl, entry.attempt);
+  }
+
+  function decodeSlideshowImage(entry, loader) {
+    if (entry.finished) {
+      releaseImageLoader(loader);
+      return;
+    }
+    var ready = function () {
+      finishSlideshowLoad(entry, loader);
+    };
+    var failed = function () {
+      if (entry.finished) {
+        return;
+      }
+      releaseImageLoader(loader);
+      retrySlideshowLoad(entry);
+    };
+    if (typeof loader.decode === "function") {
+      loader.decode().then(ready, failed);
+    } else {
+      loader.decoding = "sync";
+      ready();
+    }
+  }
+
+  function retrySlideshowLoad(entry) {
+    if (entry.finished) {
+      return;
+    }
+    if (entry.attempt >= SLIDESHOW_ATTEMPT_LIMIT) {
+      finishSlideshowLoad(entry, null);
+      return;
+    }
+    var delay = SLIDESHOW_RETRY_DELAYS_MS[entry.attempt - 1] || 0;
+    entry.timer = window.setTimeout(function () {
+      entry.timer = null;
+      attemptSlideshowLoad(entry);
+    }, delay);
+  }
+
+  function finishSlideshowLoad(entry, image) {
+    if (entry.finished) {
+      return;
+    }
+    entry.finished = true;
+    entry.image = image || null;
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    if (entry.loader) {
+      if (!image) {
+        releaseImageLoader(entry.loader);
+      }
+      entry.loader = null;
+    }
+
+    if (entry.prefetch) {
+      if (image) {
+        state.slideshowPrefetch = entry;
+      } else {
+        state.slideshowPrefetch = null;
+        // The next slide cannot load, so playback fails without waiting for
+        // the dwell to end.
+        failSlideshowSlide(entry.index);
+      }
+      return;
+    }
+
+    if (state.slideshowLoad === entry) {
+      state.slideshowLoad = null;
+    }
+    if (image) {
+      if (entry.onReady) {
+        entry.onReady(image);
+      }
+    } else if (entry.onFailed) {
+      entry.onFailed(entry.index);
+    }
+  }
+
+  // Download the next image during the current slide's dwell, honoring a
+  // reduced-data preference, and keep the element for commit to adopt.
+  function prefetchSlideshowImage() {
+    if (!state.playing || !state.open) {
+      return;
+    }
+    var connection = navigator.connection || {};
+    if (connection.saveData) {
+      return;
+    }
+    var next = slideshowTarget(state.items, state.index, false);
+    if (next === -1) {
+      return;
+    }
+    var existing = state.slideshowPrefetch;
+    if (existing && existing.index === next) {
+      return;
+    }
+    cancelSlideshowPrefetch();
+    var entry = beginSlideshowLoad(next, { prefetch: true });
+    state.slideshowPrefetch = entry;
+  }
+
+  function prepareSlideshowSlide(index) {
+    var prefetch = state.slideshowPrefetch;
+    state.slideshowPrefetch = null;
+    if (prefetch && prefetch.index === index) {
+      if (prefetch.image) {
+        commitSlideshowSlide(index, prefetch.image);
+        return;
+      }
+      if (!prefetch.finished) {
+        // Promote the in-flight prefetch so playback waits for its decode
+        // instead of starting a second download.
+        prefetch.prefetch = false;
+        prefetch.onReady = function (image) {
+          commitSlideshowSlide(index, image);
+        };
+        prefetch.onFailed = function () {
+          failSlideshowSlide(index);
+        };
+        state.slideshowLoad = prefetch;
+        return;
+      }
+      failSlideshowSlide(index);
+      return;
+    }
+    if (prefetch) {
+      cancelSlideshowEntry(prefetch);
+    }
+    var load = beginSlideshowLoad(index, {
+      onReady: function (image) {
+        commitSlideshowSlide(index, image);
+      },
+      onFailed: function () {
+        failSlideshowSlide(index);
+      }
+    });
+    state.slideshowLoad = load;
+  }
+
+  // Commit the index, chrome, URL, and decoded image together so the stage
+  // never paints a thumbnail or describes a slide that is not on screen.
+  function commitSlideshowSlide(index, image) {
+    if (!state.open || !state.playing) {
+      releaseImageLoader(image);
+      return;
+    }
+    if (index < 0 || index >= state.items.length) {
+      releaseImageLoader(image);
+      return;
+    }
+    cancelSlideshowLoad();
+    var item = state.items[index];
+    state.index = index;
+    state.scale = MIN_ZOOM;
+    state.x = 0;
+    state.y = 0;
+    cancelOriginal();
+    teardownVideo();
+    teardownPreview();
+    setErrorNote(null);
+
+    fillChrome(item, index);
+    measureStage();
+
+    image.className = "viewer-image is-original";
+    image.alt = item.alt;
+    image.decoding = "async";
+    image.draggable = false;
+    image.style.width = "";
+    image.style.height = "";
+    wrap.replaceChildren(image);
+    state.media = image;
+    state.mediaKind = "image";
+    measureFit();
+
+    updateUrl(item.path);
     scheduleSlideshow();
+    prefetchSlideshowImage();
+  }
+
+  function failSlideshowSlide(index) {
+    if (!state.open) {
+      return;
+    }
+    pauseSlideshow();
+    if (index < 0 || index >= state.items.length) {
+      return;
+    }
+    // Open through the normal paused path, then stop its delayed reload so the
+    // thumbnail preview and error note stay while the original link remains.
+    goTo(index);
+    cancelOriginal();
+    setErrorNote(ERROR_IMAGE);
+  }
+
+  function setErrorNote(text) {
+    error.textContent = text || ERROR_DEFAULT;
+    error.hidden = !text;
   }
 
   function goTo(index) {
@@ -1143,18 +1500,11 @@
     preview.style.top = Math.round(top) + "px";
   }
 
-  function showItem() {
-    var item = state.items[state.index];
-    resetZoom();
-    cancelOriginal();
-    teardownVideo();
-    teardownPreview();
-    error.hidden = true;
-
-    // Fill the chrome first so the stage measurement describes the layout that
-    // the visitor actually sees, then size the preview from that stage.
+  // Fill the chrome first so the stage measurement describes the layout that
+  // the visitor actually sees, then size the preview from that stage.
+  function fillChrome(item, index) {
     position.textContent =
-      "Item " + (state.index + 1) + " of " + state.items.length;
+      "Item " + (index + 1) + " of " + state.items.length;
     captured.textContent = captionText(item);
     var metadata = metadataText(item);
     meta.textContent = metadata;
@@ -1176,12 +1526,22 @@
     var originalLabel = "Open original: " + (item.name || item.path);
     originalLink.setAttribute("aria-label", originalLabel);
     originalLink.setAttribute("data-label", originalLabel);
-    prevButton.disabled = state.index === 0;
-    nextButton.disabled = state.index === state.items.length - 1;
+    prevButton.disabled = index === 0;
+    nextButton.disabled = index === state.items.length - 1;
     zoomInButton.disabled = item.kind === "video";
     zoomOutButton.disabled = item.kind === "video";
     resetButton.disabled = item.kind === "video";
+  }
 
+  function showItem() {
+    var item = state.items[state.index];
+    resetZoom();
+    cancelOriginal();
+    teardownVideo();
+    teardownPreview();
+    setErrorNote(null);
+
+    fillChrome(item, state.index);
     measureStage();
 
     if (item.kind === "video") {
@@ -1883,6 +2243,8 @@
     buildItemUrl: buildItemUrl,
     albumIndexOf: albumIndexOf,
     nextIndex: nextIndex,
+    firstImageIndex: firstImageIndex,
+    imageItemCount: imageItemCount,
     slideshowTarget: slideshowTarget,
     swipeThreshold: swipeThreshold,
     isSwipe: isSwipe,

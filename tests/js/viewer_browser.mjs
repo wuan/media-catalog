@@ -61,6 +61,13 @@ function loadRoutes() {
       body: fixtureHtml,
       type: "text/html; charset=utf-8"
     },
+    "/slideshow.html": {
+      body: fs.readFileSync(
+        path.join(root, "tests/js/fixtures/viewer-slideshow.html"),
+        "utf8"
+      ),
+      type: "text/html; charset=utf-8"
+    },
     "/search.html": { body: searchHtml, type: "text/html; charset=utf-8" },
     "/catalog/index.json": {
       body: searchIndex,
@@ -93,6 +100,41 @@ async function settle(page) {
         window.requestAnimationFrame(() => resolve());
       })
   );
+}
+
+async function waitForCondition(check, timeout, message) {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeout) {
+      throw new Error(message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function readSlideshow(page) {
+  return page.evaluate(() => {
+    const image = document.querySelector(".viewer-image");
+    const play = document.querySelector(".viewer-play");
+    const error = document.querySelector(".viewer-error");
+    const original = document.querySelector(".viewer-original");
+    return {
+      position: (document.querySelector(".viewer-position") || {}).textContent || "",
+      caption: (document.querySelector(".viewer-captured") || {}).textContent || "",
+      src: image ? image.getAttribute("src") : null,
+      placeholder: image ? image.classList.contains("is-placeholder") : false,
+      original: image ? image.classList.contains("is-original") : false,
+      imageCount: document.querySelectorAll(".viewer-image").length,
+      placeholders: document.querySelectorAll(".viewer-image.is-placeholder").length,
+      search: window.location.search,
+      playing: play ? play.getAttribute("aria-pressed") === "true" : false,
+      errorHidden: error
+        ? error.hidden || getComputedStyle(error).display === "none"
+        : true,
+      errorText: error ? (error.textContent || "").trim() : "",
+      originalHref: original ? original.getAttribute("href") : null
+    };
+  });
 }
 
 // Hold HTMLImageElement.decode() for one URL so a test can observe the viewer
@@ -1178,6 +1220,43 @@ try {
     });
   }
 
+  async function serveSlideshowRoutes(targetPage, routeTable, requestLog) {
+    await targetPage.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return route.continue();
+      }
+      if (url.pathname.startsWith("/media/")) {
+        requestLog.push(url.pathname + url.search);
+      }
+      const entry = routeTable.get(url.pathname);
+      if (entry) {
+        return route.fulfill({
+          status: entry.status || 200,
+          contentType: entry.type,
+          body: entry.body
+        });
+      }
+      return route.fulfill({
+        status: 404,
+        contentType: "text/plain; charset=utf-8",
+        body: "not found"
+      });
+    });
+  }
+
+  const slideshowRoutes = new Map(routes);
+  for (const originalPath of [
+    "/media/fixture/landscape.jpg",
+    "/media/fixture/portrait.jpg",
+    "/media/fixture/caption-only.jpg"
+  ]) {
+    slideshowRoutes.set(originalPath, {
+      type: "image/jpeg",
+      body: Buffer.from(LANDSCAPE_ORIGINAL_JPEG, "base64")
+    });
+  }
+
   // The search shell learns the setting from the index it loads, before results
   // render, and copies it onto the body for the viewer.
   const searchContext = await browser.newContext({
@@ -1625,6 +1704,397 @@ try {
       afterNavigation.caption.trim()
   );
   await navContext.close();
+
+  // Slideshow playback: prepare the next decoded original, skip videos,
+  // prefetch the next image, and commit only after the original paints.
+  const slideshowRequests = [];
+  const slideshowContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const slideshowPage = await slideshowContext.newPage();
+  await serveSlideshowRoutes(slideshowPage, slideshowRoutes, slideshowRequests);
+  await slideshowPage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await slideshowPage.locator("a.tile-link").first().click();
+  await slideshowPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await slideshowPage.locator(".viewer-image.is-placeholder").waitFor();
+  await slideshowPage.keyboard.press("s");
+  await slideshowPage.locator(".viewer-image.is-original").waitFor();
+  await settle(slideshowPage);
+
+  const startedSlideshow = await readSlideshow(slideshowPage);
+  assert(
+    startedSlideshow.position === "Item 1 of 5",
+    "slideshow start did not keep the open image: " + startedSlideshow.position
+  );
+  assert(
+    startedSlideshow.caption.startsWith("2024-05-01"),
+    "slideshow start changed the caption: " + startedSlideshow.caption
+  );
+  assert(
+    startedSlideshow.original && !startedSlideshow.placeholder,
+    "slideshow start did not paint the decoded original"
+  );
+  assert(startedSlideshow.playing, "slideshow start did not enter playback");
+
+  await waitForCondition(
+    () => slideshowRequests.includes("/media/fixture/portrait.jpg"),
+    2000,
+    "the slideshow did not prefetch the next image original during the dwell"
+  );
+  assert(
+    slideshowRequests.filter((request) => request === "/media/fixture/portrait.jpg")
+      .length === 1,
+    "the prefetched next image was requested more than once"
+  );
+
+  await slideshowPage.waitForFunction(
+    () => document.querySelector(".viewer-position").textContent === "Item 3 of 5",
+    null,
+    { timeout: 8000 }
+  );
+  await settle(slideshowPage);
+  const advancedSlideshow = await readSlideshow(slideshowPage);
+  assert(
+    advancedSlideshow.caption.startsWith("2024-05-03"),
+    "slideshow advance skipped the wrong items: " + advancedSlideshow.caption
+  );
+  const portraitRequests = slideshowRequests.filter((request) =>
+    request.startsWith("/media/fixture/portrait.jpg")
+  );
+  assert(
+    portraitRequests.length === 1,
+    "the commit downloaded the prefetched original again: " +
+      portraitRequests.join(", ")
+  );
+  assert(
+    advancedSlideshow.src &&
+      new URL(advancedSlideshow.src, "http://viewer.test/").pathname ===
+        "/media/fixture/portrait.jpg",
+    "the advanced slide is not the decoded original: " + advancedSlideshow.src
+  );
+  assert(
+    advancedSlideshow.original && !advancedSlideshow.placeholder,
+    "the advanced slide painted a thumbnail or placeholder"
+  );
+  assert(
+    advancedSlideshow.placeholders === 0,
+    "the slideshow stage held a placeholder image"
+  );
+  assert(
+    advancedSlideshow.search.includes("item=fixture%2Fportrait.jpg"),
+    "the slideshow advance did not update the album URL: " +
+      advancedSlideshow.search
+  );
+  assert(
+    advancedSlideshow.originalHref === "/media/fixture/portrait.jpg",
+    "the advanced slide original link is wrong: " + advancedSlideshow.originalHref
+  );
+  assert(advancedSlideshow.playing, "slideshow stopped after advancing");
+  await slideshowContext.close();
+
+  // A decode-delayed original keeps the current image visible until release,
+  // then commits the prefetched element without a second download or decode.
+  const delayedRequests = [];
+  const delayedContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const delayedPage = await delayedContext.newPage();
+  await installDecodeDelay(delayedPage, "/media/fixture/portrait.jpg");
+  await serveSlideshowRoutes(delayedPage, slideshowRoutes, delayedRequests);
+  await delayedPage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await delayedPage.locator("a.tile-link").first().click();
+  await delayedPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await delayedPage.locator(".viewer-image.is-placeholder").waitFor();
+  await delayedPage.keyboard.press("s");
+  await delayedPage.locator(".viewer-image.is-original").waitFor();
+  await delayedPage.waitForFunction(() => window.__decodeRequests >= 1);
+  await delayedPage.waitForTimeout(5200);
+
+  const heldSlide = await readSlideshow(delayedPage);
+  assert(
+    heldSlide.position === "Item 1 of 5",
+    "the slideshow advanced before the next original decoded: " +
+      heldSlide.position
+  );
+  assert(
+    heldSlide.caption.startsWith("2024-05-01"),
+    "the held slide caption changed before decode: " + heldSlide.caption
+  );
+  assert(
+    heldSlide.src &&
+      new URL(heldSlide.src, "http://viewer.test/").pathname ===
+        "/media/fixture/landscape.jpg",
+    "the held slide stopped showing the current original: " + heldSlide.src
+  );
+  assert(
+    heldSlide.original && !heldSlide.placeholder && heldSlide.imageCount === 1,
+    "the transition painted a thumbnail or blank frame before decode"
+  );
+
+  await delayedPage.evaluate(() => window.__decodeRelease());
+  await delayedPage.waitForFunction(
+    () => document.querySelector(".viewer-position").textContent === "Item 3 of 5",
+    null,
+    { timeout: 3000 }
+  );
+  await settle(delayedPage);
+  const releasedSlide = await readSlideshow(delayedPage);
+  assert(
+    releasedSlide.caption.startsWith("2024-05-03"),
+    "the released original did not commit the next slide: " + releasedSlide.caption
+  );
+  assert(
+    releasedSlide.original && !releasedSlide.placeholder,
+    "the committed slide is not the decoded original"
+  );
+  const decodeCounts = await delayedPage.evaluate(() => ({
+    requests: window.__decodeRequests,
+    completed: window.__decodeCompleted
+  }));
+  assert(
+    decodeCounts.requests === 1 && decodeCounts.completed === 1,
+    "the commit did not adopt the prefetched decode: " +
+      JSON.stringify(decodeCounts)
+  );
+  await delayedContext.close();
+
+  // Pausing while the next original is still decoding cancels the commit.
+  const cancelRequests = [];
+  const cancelContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const cancelPage = await cancelContext.newPage();
+  await installDecodeDelay(cancelPage, "/media/fixture/portrait.jpg");
+  await serveSlideshowRoutes(cancelPage, slideshowRoutes, cancelRequests);
+  await cancelPage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await cancelPage.locator("a.tile-link").first().click();
+  await cancelPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await cancelPage.locator(".viewer-image.is-placeholder").waitFor();
+  await cancelPage.keyboard.press("s");
+  await cancelPage.locator(".viewer-image.is-original").waitFor();
+  await cancelPage.waitForFunction(() => window.__decodeRequests >= 1);
+  await cancelPage.waitForTimeout(5200);
+
+  await cancelPage.keyboard.press("s");
+  await settle(cancelPage);
+  const pausedPending = await readSlideshow(cancelPage);
+  assert(!pausedPending.playing, "the pause control did not stop playback");
+
+  await cancelPage.evaluate(() => window.__decodeRelease());
+  await cancelPage.waitForTimeout(300);
+  await settle(cancelPage);
+  const afterCancel = await readSlideshow(cancelPage);
+  assert(
+    afterCancel.position === "Item 1 of 5" &&
+      afterCancel.caption.startsWith("2024-05-01"),
+    "a cancelled commit changed the slide after pause: " + afterCancel.position
+  );
+  assert(
+    afterCancel.src &&
+      new URL(afterCancel.src, "http://viewer.test/").pathname ===
+        "/media/fixture/landscape.jpg",
+    "a stale original replaced the paused slide: " + afterCancel.src
+  );
+  assert(
+    afterCancel.original && !afterCancel.placeholder && afterCancel.imageCount === 1,
+    "the cancelled commit painted a thumbnail or blank frame"
+  );
+  await cancelContext.close();
+
+  // A reduced-data preference skips the prefetch; the advance waits instead.
+  const saveDataRequests = [];
+  const saveDataContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const saveDataPage = await saveDataContext.newPage();
+  await saveDataPage.addInitScript(() => {
+    Object.defineProperty(navigator, "connection", {
+      value: { saveData: true },
+      configurable: true
+    });
+  });
+  await serveSlideshowRoutes(saveDataPage, slideshowRoutes, saveDataRequests);
+  await saveDataPage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await saveDataPage.locator("a.tile-link").first().click();
+  await saveDataPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await saveDataPage.locator(".viewer-image.is-placeholder").waitFor();
+  await saveDataPage.keyboard.press("s");
+  await saveDataPage.locator(".viewer-image.is-original").waitFor();
+  await saveDataPage.waitForTimeout(500);
+  assert(
+    !saveDataRequests.some((request) =>
+      request.startsWith("/media/fixture/portrait.jpg")
+    ),
+    "the slideshow prefetched with saveData set: " + saveDataRequests.join(", ")
+  );
+
+  await saveDataPage.waitForFunction(
+    () => document.querySelector(".viewer-position").textContent === "Item 3 of 5",
+    null,
+    { timeout: 8000 }
+  );
+  await settle(saveDataPage);
+  const saveDataAdvanced = await readSlideshow(saveDataPage);
+  assert(
+    saveDataAdvanced.original && !saveDataAdvanced.placeholder,
+    "the saveData advance painted a thumbnail or placeholder"
+  );
+  assert(
+    saveDataRequests.filter((request) =>
+      request.startsWith("/media/fixture/portrait.jpg")
+    ).length === 1,
+    "the saveData advance did not request the next original once: " +
+      saveDataRequests.join(", ")
+  );
+  await saveDataContext.close();
+
+  // The retry ladder records three attempts, then playback stops on the
+  // failed item with its thumbnail preview and error note.
+  const failureRequests = [];
+  const failureRoutes = new Map(slideshowRoutes);
+  failureRoutes.set("/media/fixture/portrait.jpg", {
+    type: "image/jpeg",
+    body: Buffer.from("not a jpeg")
+  });
+  const failureContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const failurePage = await failureContext.newPage();
+  await serveSlideshowRoutes(failurePage, failureRoutes, failureRequests);
+  await failurePage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await failurePage.locator("a.tile-link").first().click();
+  await failurePage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await failurePage.locator(".viewer-image.is-placeholder").waitFor();
+  await failurePage.keyboard.press("s");
+  await failurePage.locator(".viewer-image.is-original").waitFor();
+  await failurePage.waitForFunction(
+    () => {
+      const error = document.querySelector(".viewer-error");
+      return (
+        error &&
+        !error.hidden &&
+        getComputedStyle(error).display !== "none"
+      );
+    },
+    null,
+    { timeout: 6000 }
+  );
+  await settle(failurePage);
+
+  const failedSlide = await readSlideshow(failurePage);
+  assert(
+    failedSlide.position === "Item 3 of 5",
+    "the failed slide opened at the wrong item: " + failedSlide.position
+  );
+  assert(
+    !failedSlide.playing,
+    "playback kept running after the slide exhausted its retries"
+  );
+  assert(
+    failedSlide.placeholder && !failedSlide.original,
+    "the failed item lost its thumbnail preview"
+  );
+  assert(
+    failedSlide.errorText.includes("could not be loaded"),
+    "the failed item has no image error note: " + failedSlide.errorText
+  );
+  assert(
+    failedSlide.originalHref === "/media/fixture/portrait.jpg",
+    "the failed item original link is wrong: " + failedSlide.originalHref
+  );
+  assert(
+    failedSlide.search.includes("item=fixture%2Fportrait.jpg"),
+    "the failed item did not update the album URL: " + failedSlide.search
+  );
+  const portraitAttempts = failureRequests.filter((request) =>
+    request.startsWith("/media/fixture/portrait.jpg")
+  );
+  assert(
+    portraitAttempts.length === 3,
+    "the retry ladder made " +
+      portraitAttempts.length +
+      " requests instead of 3: " +
+      portraitAttempts.join(", ")
+  );
+  assert(
+    portraitAttempts[0] === "/media/fixture/portrait.jpg",
+    "the first attempt was not the plain original: " + portraitAttempts[0]
+  );
+  assert(
+    portraitAttempts[1] === "/media/fixture/portrait.jpg?slideshow-retry=2",
+    "the second attempt has no cache-buster: " + portraitAttempts[1]
+  );
+  assert(
+    portraitAttempts[2] === "/media/fixture/portrait.jpg?slideshow-retry=3",
+    "the third attempt has no cache-buster: " + portraitAttempts[2]
+  );
+  await failurePage.waitForTimeout(5200);
+  await settle(failurePage);
+  const afterFailureWait = await readSlideshow(failurePage);
+  assert(
+    afterFailureWait.position === "Item 3 of 5" && !afterFailureWait.playing,
+    "a timer advanced the failed slideshow: " + afterFailureWait.position
+  );
+  await failureContext.close();
+
+  // Starting on a video moves to the next image; starting on the last item
+  // restarts from the first image.
+  const videoContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const videoPage = await videoContext.newPage();
+  await serveSlideshowRoutes(videoPage, slideshowRoutes, []);
+  await videoPage.goto("http://viewer.test/slideshow.html", {
+    waitUntil: "load"
+  });
+  await videoPage.locator("a.tile-link").nth(1).click();
+  await videoPage.locator(".viewer-video").waitFor({ state: "visible" });
+  await videoPage.keyboard.press("s");
+  await videoPage.waitForFunction(
+    () => document.querySelector(".viewer-position").textContent === "Item 3 of 5",
+    null,
+    { timeout: 3000 }
+  );
+  await settle(videoPage);
+  const fromVideo = await readSlideshow(videoPage);
+  assert(
+    fromVideo.caption.startsWith("2024-05-03") && fromVideo.original,
+    "starting on a video did not move to the next image: " + fromVideo.caption
+  );
+  assert(fromVideo.playing, "starting on a video did not begin playback");
+
+  await videoPage.keyboard.press("s");
+  await settle(videoPage);
+  await videoPage.keyboard.press("Escape");
+  await videoPage.locator(".viewer[open]").waitFor({ state: "detached" });
+
+  await videoPage.locator("a.tile-link").last().click();
+  await videoPage.locator(".viewer-video").waitFor({ state: "visible" });
+  await videoPage.keyboard.press("s");
+  await videoPage.waitForFunction(
+    () => document.querySelector(".viewer-position").textContent === "Item 1 of 5",
+    null,
+    { timeout: 3000 }
+  );
+  await settle(videoPage);
+  const restarted = await readSlideshow(videoPage);
+  assert(
+    restarted.caption.startsWith("2024-05-01") && restarted.original,
+    "starting on the last item did not restart from the first image: " +
+      restarted.caption
+  );
+  assert(restarted.playing, "the restart did not begin playback");
+  await videoContext.close();
 
   console.log("viewer browser regression passed");
 } catch (error) {
