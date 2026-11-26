@@ -22,6 +22,10 @@ The viewer SHALL treat the catalog tiles rendered on the current page, in docume
 - **WHEN** a visitor opens a tile on a filtered search page
 - **THEN** previous and next navigation move through only the currently visible result tiles
 
+#### Scenario: Root recent section album
+- **WHEN** a visitor opens a tile in the root page's recent section
+- **THEN** navigation moves through only the recent tiles shown on that page, in their newest-first order
+
 #### Scenario: Filtered item disappears
 - **WHEN** filter changes while the viewer is open and the current item no longer matches
 - **THEN** the viewer closes and the updated result grid remains visible

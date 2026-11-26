@@ -11,7 +11,9 @@ use crate::scan::MediaKind;
 struct IndexTemplate {
     years: Vec<YearLink>,
     events: Vec<EventLink>,
+    recent: Vec<TileView>,
     total_items: usize,
+    location_preview: bool,
 }
 
 struct YearLink {
@@ -130,7 +132,10 @@ struct TileView {
 #[template(path = "search.html")]
 struct SearchTemplate;
 
-/// Render the root years index, including events when present.
+/// Number of recent items shown on the root page.
+const RECENT_LIMIT: usize = 24;
+
+/// Render the root years index, including events and recent items when present.
 pub fn render_index(catalog: &Catalog) -> Result<String> {
     IndexTemplate {
         years: catalog
@@ -143,10 +148,37 @@ pub fn render_index(catalog: &Catalog) -> Result<String> {
             })
             .collect(),
         events: catalog.events.iter().map(event_link).collect(),
+        recent: recent_items(catalog)
+            .into_iter()
+            .map(tile_from_item)
+            .collect(),
         total_items: catalog.item_count,
+        location_preview: catalog.location_preview,
     }
     .render()
     .context("rendering root index")
+}
+
+/// Select the newest catalog items across every folder.
+///
+/// Folder order cannot answer "most recent" because capture timestamps may
+/// disagree with the folder position. Ties resolve by descending path so the
+/// newest-first order stays deterministic.
+fn recent_items(catalog: &Catalog) -> Vec<&ItemView> {
+    let mut items: Vec<&ItemView> = catalog
+        .years
+        .iter()
+        .flat_map(|year| year.months.iter())
+        .flat_map(|month| month.items.iter())
+        .collect();
+    items.sort_by(|left, right| {
+        right
+            .captured_at
+            .cmp(&left.captured_at)
+            .then_with(|| right.path.cmp(&left.path))
+    });
+    items.truncate(RECENT_LIMIT);
+    items
 }
 
 /// Render the canonical event list at `/events/`.
@@ -446,6 +478,101 @@ mod tests {
             "/thumbs",
         );
         insta::assert_snapshot!("index_multi_year", render_index(&catalog).unwrap());
+    }
+
+    #[test]
+    fn recent_items_are_newest_first_across_folders() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/01/newer.jpg", 2024, 1, "2024-06-30 10:00:00"),
+                item("2024/06/folder-newest.jpg", 2024, 6, "2024-06-01 10:00:00"),
+                item("2023/12/older.jpg", 2023, 12, "2023-12-01 10:00:00"),
+                item("2024/06/tie-b.jpg", 2024, 6, "2024-06-15 10:00:00"),
+                item("2024/05/tie-a.jpg", 2024, 5, "2024-06-15 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+
+        let paths: Vec<_> = recent_items(&catalog)
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "2024/01/newer.jpg",
+                "2024/06/tie-b.jpg",
+                "2024/05/tie-a.jpg",
+                "2024/06/folder-newest.jpg",
+                "2023/12/older.jpg",
+            ]
+        );
+    }
+
+    #[test]
+    fn recent_selection_is_empty_safe_and_capped() {
+        let empty = build_catalog(vec![], "/media", "/thumbs");
+        assert!(recent_items(&empty).is_empty());
+
+        let few = build_catalog(
+            vec![
+                item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/05/b.jpg", 2024, 5, "2024-05-02 10:00:00"),
+                item("2024/05/c.jpg", 2024, 5, "2024-05-03 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+        assert_eq!(recent_items(&few).len(), 3);
+
+        let many = build_catalog(
+            (0..30)
+                .map(|index| {
+                    item(
+                        &format!("2024/05/item-{index:03}.jpg"),
+                        2024,
+                        5,
+                        "2024-05-01 10:00:00",
+                    )
+                })
+                .collect(),
+            "/media",
+            "/thumbs",
+        );
+        let recent = recent_items(&many);
+        assert_eq!(recent.len(), RECENT_LIMIT);
+        assert_eq!(recent.first().unwrap().path, "2024/05/item-029.jpg");
+        assert_eq!(recent.last().unwrap().path, "2024/05/item-006.jpg");
+    }
+
+    #[test]
+    fn recent_tiles_keep_video_and_placeholder_presentation() {
+        let catalog = build_catalog(
+            vec![
+                CatalogItemInput {
+                    kind: MediaKind::Video,
+                    duration_ms: Some(65_000),
+                    ..item("2024/05/clip.mp4", 2024, 5, "2024-05-02 10:00:00")
+                },
+                CatalogItemInput {
+                    thumb_available: false,
+                    thumb_version: None,
+                    ..item("2024/05/a.heic", 2024, 5, "2024-05-01 10:00:00")
+                },
+            ],
+            "/media",
+            "/thumbs",
+        );
+        let html = render_index(&catalog).unwrap();
+        assert!(html.contains("<h1>Recent</h1>"));
+        assert!(html.contains("class=\"grid recent-grid\""));
+        assert!(html.contains("href=\"/media/2024/05/clip.mp4\""));
+        assert!(html.contains("data-kind=\"video\""));
+        assert!(html.contains("Video"));
+        assert!(html.contains("1:05"));
+        assert!(html.contains("class=\"placeholder\""));
+        assert!(html.contains("aria-label=\"a.heic\""));
     }
 
     #[test]
@@ -839,10 +966,16 @@ mod tests {
     #[test]
     fn pages_load_the_viewer_script_once() {
         let catalog = cross_month_catalog();
+        let root = render_index(&catalog).unwrap();
         let month = render_month(&catalog, 2024, 5).unwrap().unwrap();
         let event = render_event(&catalog, "may-trip").unwrap().unwrap();
         let search = render_search_shell().unwrap();
-        for (label, html) in [("month", month), ("event", event), ("search", search)] {
+        for (label, html) in [
+            ("root", root),
+            ("month", month),
+            ("event", event),
+            ("search", search),
+        ] {
             assert_eq!(
                 html.matches("/assets/viewer.js").count(),
                 1,
@@ -854,14 +987,21 @@ mod tests {
     #[test]
     fn preview_attribute_follows_the_catalog_setting() {
         let mut catalog = cross_month_catalog();
+        let root_off = render_index(&catalog).unwrap();
         let month_off = render_month(&catalog, 2024, 5).unwrap().unwrap();
         let event_off = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(!root_off.contains("data-location-preview"));
         assert!(!month_off.contains("data-location-preview"));
         assert!(!event_off.contains("data-location-preview"));
 
         catalog.location_preview = true;
+        let root_on = render_index(&catalog).unwrap();
         let month_on = render_month(&catalog, 2024, 5).unwrap().unwrap();
         let event_on = render_event(&catalog, "may-trip").unwrap().unwrap();
+        assert!(
+            root_on.contains("<body data-location-preview=\"true\">"),
+            "{root_on}"
+        );
         assert!(
             month_on.contains("<body data-location-preview=\"true\">"),
             "{month_on}"

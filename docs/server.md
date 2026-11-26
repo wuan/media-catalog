@@ -91,7 +91,7 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
 
 | Route | Behavior |
 | --- | --- |
-| `/` | rendered years index from JSON, with an Events section above Years when configured; bootstrap page before publication |
+| `/` | rendered years index from JSON, with an Events section above Years when configured and a Recent section of up to 24 newest items below them; bootstrap page before publication |
 | `/events/` | rendered event list; empty list when no events are configured; `503` before publication |
 | `/events/{slug}/` | rendered event page with month sections; `404` for unknown slugs; `503` before publication |
 | `/{year}/`, `/{year}/{month}/` | rendered pages; `404` for unknown years/months; `503` before publication |

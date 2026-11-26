@@ -45,6 +45,10 @@ function loadRoutes() {
     <script src="/assets/search.js"></script>
   </body>
 </html>`;
+  const recentHtml = fs.readFileSync(
+    path.join(root, "tests/js/fixtures/viewer-recent.html"),
+    "utf8"
+  );
   const searchIndex = JSON.stringify({
     schema_version: 2,
     total_items: 0,
@@ -66,6 +70,11 @@ function loadRoutes() {
         path.join(root, "tests/js/fixtures/viewer-slideshow.html"),
         "utf8"
       ),
+      type: "text/html; charset=utf-8"
+    },
+    "/recent.html": { body: recentHtml, type: "text/html; charset=utf-8" },
+    "/tests/js/fixtures/viewer-recent.html": {
+      body: recentHtml,
       type: "text/html; charset=utf-8"
     },
     "/search.html": { body: searchHtml, type: "text/html; charset=utf-8" },
@@ -212,6 +221,28 @@ async function readGeometry(page) {
 function expectedEdge(stage, item) {
   const fit = Math.min(stage.width / item.width, stage.height / item.height);
   return Math.min(item.width * fit, item.height * fit);
+}
+
+async function readRecentGrid(page) {
+  return page.evaluate(() => {
+    const grid = document.querySelector(".recent-grid");
+    if (!grid) {
+      return null;
+    }
+    const tiles = Array.from(document.querySelectorAll(".recent-grid .tile"));
+    const rows = new Set(
+      tiles.map((tile) => Math.round(tile.getBoundingClientRect().top))
+    ).size;
+    const columns = getComputedStyle(grid)
+      .gridTemplateColumns.split(/\s+/)
+      .filter(Boolean).length;
+    return {
+      rows,
+      columns,
+      count: tiles.length,
+      overflow: grid.scrollWidth - grid.clientWidth
+    };
+  });
 }
 
 async function readControls(page) {
@@ -2095,6 +2126,193 @@ try {
   );
   assert(restarted.playing, "the restart did not begin playback");
   await videoContext.close();
+
+  // The root page recent grid is fixed at six, three, and two columns so the
+  // same 24 tiles occupy four, eight, and twelve rows without clipping.
+  const recentContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 }
+  });
+  const recentPage = await recentContext.newPage();
+  await serveWithRoutes(recentPage, [], () => false);
+  await recentPage.goto("http://viewer.test/recent.html", { waitUntil: "load" });
+  await recentPage.locator("a.tile-link").first().waitFor();
+
+  const wideGrid = await readRecentGrid(recentPage);
+  assert(wideGrid, "the recent fixture did not render a recent grid");
+  assert(wideGrid.count === 24, "the recent grid has " + wideGrid.count + " tiles");
+  assert(
+    wideGrid.columns === 6 && wideGrid.rows === 4,
+    "wide recent grid is " +
+      wideGrid.columns +
+      " columns and " +
+      wideGrid.rows +
+      " rows instead of 6 and 4"
+  );
+  assert(wideGrid.overflow <= TOLERANCE, "the wide recent grid clips tiles");
+
+  await recentPage.setViewportSize({ width: 800, height: 800 });
+  await settle(recentPage);
+  const mediumGrid = await readRecentGrid(recentPage);
+  assert(
+    mediumGrid.columns === 3 && mediumGrid.rows === 8,
+    "medium recent grid is " +
+      mediumGrid.columns +
+      " columns and " +
+      mediumGrid.rows +
+      " rows instead of 3 and 8"
+  );
+  assert(mediumGrid.overflow <= TOLERANCE, "the medium recent grid clips tiles");
+
+  await recentPage.setViewportSize({ width: 375, height: 800 });
+  await settle(recentPage);
+  const narrowGrid = await readRecentGrid(recentPage);
+  assert(
+    narrowGrid.columns === 2 && narrowGrid.rows === 12,
+    "narrow recent grid is " +
+      narrowGrid.columns +
+      " columns and " +
+      narrowGrid.rows +
+      " rows instead of 2 and 12"
+  );
+  assert(narrowGrid.overflow <= TOLERANCE, "the narrow recent grid clips tiles");
+
+  await recentPage.setViewportSize({ width: 1280, height: 800 });
+  await settle(recentPage);
+
+  async function readRecentViewer(page) {
+    return page.evaluate(() => {
+      const position = document.querySelector(".viewer-position");
+      const caption = document.querySelector(".viewer-captured");
+      const previous = document.querySelector(".viewer-prev");
+      const next = document.querySelector(".viewer-next");
+      return {
+        position: position ? position.textContent : "",
+        caption: caption ? caption.textContent : "",
+        previousDisabled: previous ? previous.disabled : null,
+        nextDisabled: next ? next.disabled : null
+      };
+    });
+  }
+
+  await recentPage.locator("a.tile-link").nth(0).click();
+  await recentPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await settle(recentPage);
+  const firstRecent = await readRecentViewer(recentPage);
+  assert(
+    firstRecent.position === "Item 1 of 24",
+    "the newest recent tile opened at " + firstRecent.position
+  );
+  assert(
+    firstRecent.caption.startsWith("2024-06-12"),
+    "the newest recent tile caption is " + firstRecent.caption
+  );
+  assert(firstRecent.previousDisabled, "previous is enabled on the first recent tile");
+
+  await recentPage.keyboard.press("ArrowRight");
+  await settle(recentPage);
+  const secondRecent = await readRecentViewer(recentPage);
+  assert(
+    secondRecent.position === "Item 2 of 24" &&
+      secondRecent.caption.startsWith("2024-06-11"),
+    "next did not follow the newest-first recent order: " +
+      secondRecent.position +
+      " " +
+      secondRecent.caption
+  );
+
+  await recentPage.keyboard.press("ArrowLeft");
+  await settle(recentPage);
+  const backToFirst = await readRecentViewer(recentPage);
+  assert(
+    backToFirst.position === "Item 1 of 24" &&
+      backToFirst.caption.startsWith("2024-06-12"),
+    "previous did not return to the newest recent tile: " + backToFirst.position
+  );
+
+  await recentPage.keyboard.press("Escape");
+  await recentPage.locator(".viewer[open]").waitFor({ state: "detached" });
+
+  // Crossing the month boundary still stays inside the recent album.
+  await recentPage.locator("a.tile-link").nth(12).click();
+  await recentPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await settle(recentPage);
+  const mayRecent = await readRecentViewer(recentPage);
+  assert(
+    mayRecent.position === "Item 13 of 24" &&
+      mayRecent.caption.startsWith("2024-05-12"),
+    "the first May tile opened at " +
+      mayRecent.position +
+      " " +
+      mayRecent.caption
+  );
+
+  await recentPage.keyboard.press("ArrowRight");
+  await settle(recentPage);
+  const mayNext = await readRecentViewer(recentPage);
+  assert(
+    mayNext.position === "Item 14 of 24" &&
+      mayNext.caption.startsWith("2024-05-11"),
+    "next did not stay in the recent album across months: " +
+      mayNext.position +
+      " " +
+      mayNext.caption
+  );
+
+  await recentPage.keyboard.press("ArrowLeft");
+  await settle(recentPage);
+  const mayPrevious = await readRecentViewer(recentPage);
+  assert(
+    mayPrevious.position === "Item 13 of 24" &&
+      mayPrevious.caption.startsWith("2024-05-12"),
+    "previous did not stay in the recent album across months: " +
+      mayPrevious.position
+  );
+
+  await recentPage.keyboard.press("Escape");
+  await recentPage.locator(".viewer[open]").waitFor({ state: "detached" });
+  await recentPage.locator("a.tile-link").nth(23).click();
+  await recentPage.locator(".viewer[open]").waitFor({ state: "visible" });
+  await settle(recentPage);
+  const lastRecent = await readRecentViewer(recentPage);
+  assert(
+    lastRecent.position === "Item 24 of 24" &&
+      lastRecent.caption.startsWith("2024-05-01"),
+    "the last recent tile opened at " + lastRecent.position
+  );
+  assert(lastRecent.nextDisabled, "next is enabled on the last recent tile");
+  await recentContext.close();
+
+  // Without JavaScript every recent tile stays a direct original link.
+  const noScriptContext = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    javaScriptEnabled: false
+  });
+  const noScriptPage = await noScriptContext.newPage();
+  await serveWithRoutes(noScriptPage, [], () => false);
+  await noScriptPage.goto("http://viewer.test/recent.html", { waitUntil: "load" });
+  const staticTiles = await noScriptPage.evaluate(() =>
+    Array.from(document.querySelectorAll("a.tile-link")).map((tile) => ({
+      href: tile.getAttribute("href"),
+      viewerOpen: Boolean(document.querySelector(".viewer[open]"))
+    }))
+  );
+  assert(staticTiles.length === 24, "the static recent page lost tiles");
+  assert(
+    staticTiles.every(
+      (tile) => tile.href && tile.href.startsWith("/media/fixture/recent-")
+    ),
+    "a static recent tile does not link to its original"
+  );
+  assert(
+    staticTiles[0].href === "/media/fixture/recent-06-12.jpg" &&
+      staticTiles[23].href === "/media/fixture/recent-05-01.jpg",
+    "the static recent tiles are not newest first"
+  );
+  assert(
+    staticTiles.every((tile) => !tile.viewerOpen),
+    "scripting-disabled tiles opened a viewer"
+  );
+  await noScriptContext.close();
 
   console.log("viewer browser regression passed");
 } catch (error) {

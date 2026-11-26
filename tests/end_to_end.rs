@@ -6,6 +6,8 @@ use axum::body::Body;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use axum::Router;
 use common::Fixture;
+use media_catalog::json;
+use media_catalog::model::build_catalog;
 use media_catalog::run_with_config;
 use media_catalog::server::{router, ServerConfig};
 use serde_json::Value;
@@ -224,6 +226,104 @@ description = "A crossing event."
     let root = html(&body);
     assert!(root.find("Events").unwrap() < root.find("Years").unwrap());
     assert!(root.contains("href=\"/events/may-trip/\""));
+}
+
+#[tokio::test]
+async fn root_page_shows_recent_items_newest_first() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2023/12/old.jpg",
+        Some(1),
+        Some("2023:12:01 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/05/early.jpg",
+        Some(1),
+        Some("2024:05:10 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/06/newest.jpg",
+        Some(1),
+        Some("2024:06:20 10:00:00"),
+        false,
+    );
+    if !fixture.write_video("2024/05/clip.mp4", 2) {
+        eprintln!("skipping root recent item test: ffmpeg unavailable");
+        return;
+    }
+    // Capture timestamps can disagree with folder position. Put the video
+    // between the newest image and the May image so recency is global.
+    let video_path = fixture.media_path("2024/05/clip.mp4");
+    let touched = std::process::Command::new("touch")
+        .arg("-t")
+        .arg("202406100900")
+        .arg(&video_path)
+        .status()
+        .expect("set video modification time");
+    assert!(touched.success());
+
+    let outcome = run_with_config(fixture.config()).unwrap();
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
+
+    let (status, _, body) = send(&app, Method::GET, "/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let root = html(&body);
+    let years_heading = root.find("<h1>Years</h1>").expect("years heading");
+    let recent_heading = root.find("<h1>Recent</h1>").expect("recent heading");
+    assert!(
+        years_heading < recent_heading,
+        "the recent section must follow Years"
+    );
+
+    let recent = &root[recent_heading..];
+    let newest = recent
+        .find("href=\"/media/2024/06/newest.jpg\"")
+        .expect("newest image");
+    let video = recent
+        .find("href=\"/media/2024/05/clip.mp4\"")
+        .expect("recent video");
+    let early = recent
+        .find("href=\"/media/2024/05/early.jpg\"")
+        .expect("May image");
+    let old = recent
+        .find("href=\"/media/2023/12/old.jpg\"")
+        .expect("old image");
+    assert!(
+        newest < video && video < early && early < old,
+        "recent tiles must be newest first across folders: {recent}"
+    );
+    assert!(recent.contains("data-kind=\"video\""));
+    assert!(recent.contains("Video"));
+    assert!(recent.contains("0:02"));
+    assert_eq!(root.matches("/assets/viewer.js").count(), 1);
+}
+
+#[tokio::test]
+async fn empty_published_catalog_omits_the_recent_section() {
+    let fixture = Fixture::new();
+    let catalog = build_catalog(vec![], "/media", "/thumbs");
+    let output = json::render_json(&catalog).unwrap();
+    let catalog_dir = fixture.data.join("catalog");
+    std::fs::create_dir_all(&catalog_dir).unwrap();
+    std::fs::write(catalog_dir.join("index.json"), output.index).unwrap();
+
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
+
+    let (status, _, body) = send(&app, Method::GET, "/", Vec::new()).await;
+    assert_eq!(status, StatusCode::OK);
+    let root = html(&body);
+    assert!(root.contains("<h1>Years</h1>"));
+    assert!(root.contains("No media found yet."));
+    assert!(!root.contains("<h1>Recent</h1>"));
+    assert!(!root.contains("recent-grid"));
 }
 
 #[tokio::test]

@@ -103,7 +103,7 @@ cargo run --release --bin media-catalog-server -- \
 
 It listens on `127.0.0.1:8080` by default:
 
-- `/` → root page rendered from JSON, with events above the year hierarchy
+- `/` → root page rendered from JSON, with events above the year hierarchy and a Recent section of the newest 24 items below it
 - `/events/`, `/events/{slug}/` → rendered event list and event pages
 - `/{year}/`, `/{year}/{month}/` → rendered year and month pages
 - `/search.html`, `/assets/*` → embedded search shell, CSS, and JavaScript
