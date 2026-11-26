@@ -7,19 +7,19 @@ expression: "output.shards[&2024]"
   "year": 2024,
   "items": [
     {
-      "path": "2024/06/outside.jpg",
-      "month": 6,
+      "path": "2024/05/a.jpg",
+      "month": 5,
       "kind": "image",
-      "captured_at": "2024-06-20 09:00:00",
+      "captured_at": "2024-05-30 10:11:12",
       "size_bytes": 0,
       "width": 4000,
       "height": 3000,
       "duration_ms": null,
-      "thumb_url": "/thumbs/2024/06/outside.jpg.webp?v=12-22",
-      "media_url": "/media/2024/06/outside.jpg",
+      "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=10-20",
+      "media_url": "/media/2024/05/a.jpg",
       "thumb_available": true,
       "events": [
-        "june"
+        "may-trip"
       ]
     },
     {
@@ -40,19 +40,19 @@ expression: "output.shards[&2024]"
       ]
     },
     {
-      "path": "2024/05/a.jpg",
-      "month": 5,
+      "path": "2024/06/outside.jpg",
+      "month": 6,
       "kind": "image",
-      "captured_at": "2024-05-30 10:11:12",
+      "captured_at": "2024-06-20 09:00:00",
       "size_bytes": 0,
       "width": 4000,
       "height": 3000,
       "duration_ms": null,
-      "thumb_url": "/thumbs/2024/05/a.jpg.webp?v=10-20",
-      "media_url": "/media/2024/05/a.jpg",
+      "thumb_url": "/thumbs/2024/06/outside.jpg.webp?v=12-22",
+      "media_url": "/media/2024/06/outside.jpg",
       "thumb_available": true,
       "events": [
-        "may-trip"
+        "june"
       ]
     }
   ]

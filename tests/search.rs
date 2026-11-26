@@ -75,6 +75,10 @@ fn search_filters_narrow_the_loaded_shards() {
         result["metadataWithoutLocation"],
         serde_json::json!({"data-iso": "100"})
     );
+    assert_eq!(
+        result["order"],
+        serde_json::json!(["2024/05/alpha.jpg", "2024/05/beta.jpg", "2023/12/gamma.mp4"])
+    );
     assert_eq!(result["query"], "q=gamma&kind=video&year=2023&month=12");
 }
 
@@ -86,6 +90,79 @@ fn search_page_works_without_javascript_and_links_to_browse() {
     assert!(html.contains("href=\"/\""));
     assert!(html.contains("id=\"filters\""));
     assert!(html.contains("assets/search.js"));
+}
+
+#[test]
+fn published_json_and_search_data_follow_the_archive_order() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/early.jpg",
+        Some(1),
+        Some("2024:05:01 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/05/later.jpg",
+        Some(1),
+        Some("2024:05:02 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/12/late.jpg",
+        Some(1),
+        Some("2024:12:02 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2023/12/old.jpg",
+        Some(1),
+        Some("2023:12:31 10:00:00"),
+        false,
+    );
+
+    let outcome = run_with_config(fixture.config()).unwrap();
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+
+    let index: Value = serde_json::from_str(&fixture.read_json("catalog/index.json")).unwrap();
+    let years = index["years"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|year| year["year"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(years, vec![2024, 2023]);
+
+    let months = index["years"][0]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|month| month["month"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(months, vec![5, 12]);
+
+    // Search concatenates shard items in index order, so this is the order its
+    // filters preserve.
+    let mut paths = Vec::new();
+    for year in index["years"].as_array().unwrap() {
+        let shard_path = year["shard"].as_str().unwrap();
+        let shard: Value = serde_json::from_str(&fixture.read_json(shard_path)).unwrap();
+        for item in shard["items"].as_array().unwrap() {
+            paths.push(item["path"].as_str().unwrap().to_string());
+        }
+    }
+    assert_eq!(
+        paths,
+        vec![
+            "2024/05/early.jpg",
+            "2024/05/later.jpg",
+            "2024/12/late.jpg",
+            "2023/12/old.jpg"
+        ]
+    );
 }
 
 #[test]

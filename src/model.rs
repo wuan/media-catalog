@@ -193,8 +193,9 @@ pub fn month_short_label(year: i32, month: u32) -> String {
         .unwrap_or_else(|| format!("{month:02}"))
 }
 
-/// Build the deterministic model: newest years/months first, and items ordered by
-/// capture timestamp descending with the relative path as a stable tie-break.
+/// Build the deterministic model: years newest first, months within each year
+/// ascending, and items ordered by capture timestamp ascending with the relative
+/// path as a stable tie-break.
 pub fn build_catalog(
     items: Vec<CatalogItemInput>,
     media_url_prefix: &str,
@@ -245,11 +246,10 @@ pub fn build_catalog(
     let mut total = 0usize;
     for (year, months) in by_year.into_iter().rev() {
         let mut month_views = Vec::with_capacity(months.len());
-        for (month, mut items) in months.into_iter().rev() {
+        for (month, mut items) in months {
             items.sort_by(|left, right| {
-                right
-                    .captured_at
-                    .cmp(&left.captured_at)
+                left.captured_at
+                    .cmp(&right.captured_at)
                     .then_with(|| left.path.cmp(&right.path))
             });
             total += items.len();
@@ -301,28 +301,41 @@ mod tests {
     }
 
     #[test]
-    fn years_and_months_are_newest_first() {
+    fn years_are_newest_first() {
         let catalog = build_catalog(
             vec![
                 item("2023/12/a.jpg", 2023, 12, "2023-12-01 00:00:00"),
-                item("2024/05/a.jpg", 2024, 5, "2024-05-01 00:00:00"),
-                item("2024/01/a.jpg", 2024, 1, "2024-01-01 00:00:00"),
+                item("2025/02/b.jpg", 2025, 2, "2025-02-01 00:00:00"),
+                item("2024/05/c.jpg", 2024, 5, "2024-05-01 00:00:00"),
             ],
             "/media",
             "/thumbs",
         );
         let years: Vec<_> = catalog.years.iter().map(|year| year.year).collect();
-        assert_eq!(years, vec![2024, 2023]);
+        assert_eq!(years, vec![2025, 2024, 2023]);
+    }
+
+    #[test]
+    fn months_ascend_and_skip_empty_months() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/12/a.jpg", 2024, 12, "2024-12-01 00:00:00"),
+                item("2024/01/b.jpg", 2024, 1, "2024-01-01 00:00:00"),
+                item("2024/05/c.jpg", 2024, 5, "2024-05-01 00:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
         let months: Vec<_> = catalog.years[0]
             .months
             .iter()
             .map(|month| month.month)
             .collect();
-        assert_eq!(months, vec![5, 1]);
+        assert_eq!(months, vec![1, 5, 12]);
     }
 
     #[test]
-    fn items_are_newest_first_with_path_tie_break() {
+    fn items_are_oldest_first_with_path_tie_break() {
         let catalog = build_catalog(
             vec![
                 item("2024/05/b.jpg", 2024, 5, "2024-05-01 10:00:00"),
@@ -339,7 +352,7 @@ mod tests {
             .collect();
         assert_eq!(
             paths,
-            vec!["2024/05/c.jpg", "2024/05/a.jpg", "2024/05/b.jpg"]
+            vec!["2024/05/a.jpg", "2024/05/b.jpg", "2024/05/c.jpg"]
         );
     }
 

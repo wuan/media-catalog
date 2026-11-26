@@ -61,7 +61,7 @@ The generator SHALL extract width, height, capture timestamp, video duration, an
 - **THEN** GPS, location, and serial numbers do not appear in generated HTML or JSON, while the camera model, lens settings, and file size may appear
 
 ### Requirement: Order catalog items deterministically
-The generator SHALL present years, months, and items in reverse chronological order, ordering items within a month by capture timestamp and then by relative path so repeated runs produce the same order.
+The generator SHALL order years newest first, months within each year by month number ascending, and items within each month by capture timestamp ascending (oldest first), with the relative path as a stable tie-break, so repeated runs produce the same order.
 
 #### Scenario: Stable ordering across runs
 - **WHEN** the same unchanged media tree is scanned twice
@@ -70,6 +70,18 @@ The generator SHALL present years, months, and items in reverse chronological or
 #### Scenario: Same capture timestamp
 - **WHEN** two items share a capture timestamp
 - **THEN** their relative paths break the tie deterministically
+
+#### Scenario: Years are newest first
+- **WHEN** the catalog contains items from 2023 and 2024
+- **THEN** the root index and each year's position in the published index list 2024 before 2023
+
+#### Scenario: Months ascend within a year
+- **WHEN** a year contains items in January, May, and December
+- **THEN** its year page and published months array list January before May before December
+
+#### Scenario: Items are oldest first within a month
+- **WHEN** a month contains items captured on 2024-05-01, 2024-05-02, and 2024-05-03
+- **THEN** the month page and shard list the 2024-05-01 item before the later items
 
 ### Requirement: Tolerate unreadable items
 The generator SHALL continue processing the remaining catalog when an individual file cannot be read or decoded, and SHALL report each failure in the run summary.

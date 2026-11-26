@@ -449,6 +449,38 @@ mod tests {
     }
 
     #[test]
+    fn archive_pages_list_ascending_months_and_oldest_items() {
+        let catalog = build_catalog(
+            vec![
+                item("2024/12/late.jpg", 2024, 12, "2024-12-02 10:00:00"),
+                item("2024/05/later.jpg", 2024, 5, "2024-05-02 10:00:00"),
+                item("2024/05/early.jpg", 2024, 5, "2024-05-01 10:00:00"),
+                item("2024/01/first.jpg", 2024, 1, "2024-01-01 10:00:00"),
+            ],
+            "/media",
+            "/thumbs",
+        );
+
+        let year = render_year(&catalog, 2024).unwrap().unwrap();
+        let january = year.find("href=\"/2024/01/\"").expect("January link");
+        let may = year.find("href=\"/2024/05/\"").expect("May link");
+        let december = year.find("href=\"/2024/12/\"").expect("December link");
+        assert!(january < may && may < december, "year months: {year}");
+
+        let month = render_month(&catalog, 2024, 5).unwrap().unwrap();
+        let early = month
+            .find("href=\"/media/2024/05/early.jpg\"")
+            .expect("early item");
+        let later = month
+            .find("href=\"/media/2024/05/later.jpg\"")
+            .expect("later item");
+        assert!(early < later, "month items: {month}");
+
+        insta::assert_snapshot!("year_2024_ordered_months", year);
+        insta::assert_snapshot!("month_2024_05_ordered_items", month);
+    }
+
+    #[test]
     fn unknown_year_and_month_have_no_page() {
         let catalog = build_catalog(
             vec![item("2024/05/a.jpg", 2024, 5, "2024-05-01 10:00:00")],

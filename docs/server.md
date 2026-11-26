@@ -106,9 +106,10 @@ curl -H "Authorization: Bearer $MEDIA_CATALOG_TOKEN" \
   are registered before the static fallback. Explicit `/events/...` routes are
   registered ahead of the numeric routes so they never fall through to year
   handling. Unknown/invalid segments return `404`, never a directory listing.
-- Event pages group items by folder month, oldest month and oldest item first;
-  month headings link to `/YYYY/MM/`. They reuse the same lazy tile markup and
-  remain usable without JavaScript.
+- Archive pages keep years newest first, list months ascending within each year,
+  and show month items oldest first. Event pages group items by folder month,
+  oldest month and oldest item first; month headings link to `/YYYY/MM/`. They
+  reuse the same lazy tile markup and remain usable without JavaScript.
 - `HEAD` returns headers without a body for catalog pages and embedded assets.
 - `Range: bytes=start-end`, `bytes=start-`, and `bytes=-suffix` return `206` with
   `Content-Range`; unsatisfiable ranges return `416`.

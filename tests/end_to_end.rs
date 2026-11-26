@@ -69,6 +69,10 @@ async fn generator_output_is_served_end_to_end() {
     assert!(root.contains("2024"));
     assert!(root.contains("2023"));
     assert!(root.contains("href=\"/2024/\""));
+    assert!(
+        root.find("href=\"/2024/\"").unwrap() < root.find("href=\"/2023/\"").unwrap(),
+        "root years must be newest first"
+    );
 
     let (status, _, body) = send(&app, Method::GET, "/2024/", Vec::new()).await;
     assert_eq!(status, StatusCode::OK);
@@ -88,6 +92,13 @@ async fn generator_output_is_served_end_to_end() {
     )
     .unwrap();
     assert_eq!(index["total_items"], 2);
+    let years = index["years"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|year| year["year"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(years, vec![2024, 2023]);
     let shard_path = index["years"][0]["shard"].as_str().unwrap();
     let (status, headers, shard_body) =
         send(&app, Method::GET, &format!("/{shard_path}"), Vec::new()).await;
@@ -213,6 +224,128 @@ description = "A crossing event."
     let root = html(&body);
     assert!(root.find("Events").unwrap() < root.find("Years").unwrap());
     assert!(root.contains("href=\"/events/may-trip/\""));
+}
+
+#[tokio::test]
+async fn archive_pages_use_the_hybrid_order_while_events_stay_chronological() {
+    let fixture = Fixture::new();
+    fixture.write_jpeg_with_exif(
+        "2024/05/early.jpg",
+        Some(1),
+        Some("2024:05:01 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/05/later.jpg",
+        Some(1),
+        Some("2024:05:02 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2024/12/end.jpg",
+        Some(1),
+        Some("2024:12:01 10:00:00"),
+        false,
+    );
+    fixture.write_jpeg_with_exif(
+        "2023/12/old.jpg",
+        Some(1),
+        Some("2023:12:15 10:00:00"),
+        false,
+    );
+
+    let events_path = fixture.root().join("events.toml");
+    std::fs::write(
+        &events_path,
+        r#"
+[[events]]
+slug = "spring"
+title = "Spring"
+start = "2024-05-01 00:00"
+end = "2024-12-31 23:59"
+"#,
+    )
+    .unwrap();
+
+    let mut config = fixture.config();
+    config.events_file = Some(events_path);
+    let outcome = run_with_config(config).unwrap();
+    assert!(
+        outcome.summary.errors.is_empty(),
+        "{:?}",
+        outcome.summary.errors
+    );
+
+    let app = router(ServerConfig::new(&fixture.data, &fixture.media)).unwrap();
+
+    let (_, _, body) = send(&app, Method::GET, "/", Vec::new()).await;
+    let root = html(&body);
+    assert!(
+        root.find("href=\"/2024/\"").unwrap() < root.find("href=\"/2023/\"").unwrap(),
+        "root years must be newest first"
+    );
+
+    let (_, _, body) = send(&app, Method::GET, "/2024/", Vec::new()).await;
+    let year = html(&body);
+    assert!(
+        year.find("href=\"/2024/05/\"").unwrap() < year.find("href=\"/2024/12/\"").unwrap(),
+        "year months must ascend"
+    );
+
+    let (_, _, body) = send(&app, Method::GET, "/2024/05/", Vec::new()).await;
+    let month = html(&body);
+    assert!(
+        month.find("href=\"/media/2024/05/early.jpg\"").unwrap()
+            < month.find("href=\"/media/2024/05/later.jpg\"").unwrap(),
+        "month items must be oldest first"
+    );
+
+    let (_, _, body) = send(&app, Method::GET, "/events/spring/", Vec::new()).await;
+    let event = html(&body);
+    assert!(
+        event.find("May 2024").unwrap() < event.find("December 2024").unwrap(),
+        "event month groups must stay oldest first"
+    );
+    assert!(
+        event.find("href=\"/media/2024/05/early.jpg\"").unwrap()
+            < event.find("href=\"/media/2024/05/later.jpg\"").unwrap(),
+        "event items must stay oldest first"
+    );
+    assert!(!event.contains("old.jpg"));
+
+    let index: Value = serde_json::from_slice(
+        &send(&app, Method::GET, "/catalog/index.json", Vec::new())
+            .await
+            .2,
+    )
+    .unwrap();
+    let years = index["years"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|year| year["year"].as_i64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(years, vec![2024, 2023]);
+    let months = index["years"][0]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|month| month["month"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(months, vec![5, 12]);
+
+    let (_, _, shard_body) = send(&app, Method::GET, "/catalog/2024.json", Vec::new()).await;
+    let shard: Value = serde_json::from_slice(&shard_body).unwrap();
+    let paths = shard["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        vec!["2024/05/early.jpg", "2024/05/later.jpg", "2024/12/end.jpg"]
+    );
 }
 
 #[tokio::test]

@@ -7,19 +7,6 @@ expression: "output.shards[&2024]"
   "year": 2024,
   "items": [
     {
-      "path": "2024/05/broken.heic",
-      "month": 5,
-      "kind": "image",
-      "captured_at": "2024-05-03 12:00:00",
-      "size_bytes": 532000,
-      "width": null,
-      "height": null,
-      "duration_ms": null,
-      "thumb_url": null,
-      "media_url": "/media/2024/05/broken.heic",
-      "thumb_available": false
-    },
-    {
       "path": "2024/05/clip.mp4",
       "month": 5,
       "kind": "video",
@@ -32,6 +19,19 @@ expression: "output.shards[&2024]"
       "thumb_url": "/thumbs/2024/05/clip.mp4.webp?v=30-40",
       "media_url": "/media/2024/05/clip.mp4",
       "thumb_available": true
+    },
+    {
+      "path": "2024/05/broken.heic",
+      "month": 5,
+      "kind": "image",
+      "captured_at": "2024-05-03 12:00:00",
+      "size_bytes": 532000,
+      "width": null,
+      "height": null,
+      "duration_ms": null,
+      "thumb_url": null,
+      "media_url": "/media/2024/05/broken.heic",
+      "thumb_available": false
     }
   ]
 }

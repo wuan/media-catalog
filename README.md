@@ -435,8 +435,11 @@ without restarting the server.
 
 ## JSON catalog and search
 
-`catalog/index.json` lists years, counts, months, and shard paths. When events are
-configured it also includes event metadata ordered by newest start and then slug:
+`catalog/index.json` lists years, counts, months, and shard paths. Years are
+published newest first. Within each year, `months` ascends by month number, and
+each shard groups its items by ascending month and lists them oldest first. When
+events are configured the index also includes event metadata ordered by newest
+start and then slug:
 
 ```json
 {

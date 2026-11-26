@@ -64,6 +64,9 @@ const result = {
   }),
   metadataAbsent: api.metadataAttributes({ path: "2024/05/a.jpg" }),
   metadataWithoutLocation: api.metadataAttributes({ iso: 100 }),
+  order: api.filterItems(items, {}).map(function (item) {
+    return item.path;
+  }),
   query: query
 };
 

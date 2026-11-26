@@ -42,6 +42,28 @@ fn first_run_builds_output_and_second_run_is_idempotent() {
 
     assert!(fixture.data_path("catalog/index.json").exists());
     assert!(fixture.data_path("catalog/2024.json").exists());
+
+    let index: Value = serde_json::from_str(&fixture.read_json("catalog/index.json")).unwrap();
+    let months = index["years"][0]["months"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|month| month["month"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(months, vec![5, 6]);
+
+    let shard: Value = serde_json::from_str(&fixture.read_json("catalog/2024.json")).unwrap();
+    let paths = shard["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        vec!["2024/05/a.jpg", "2024/05/b.jpg", "2024/06/c.jpg"]
+    );
+
     for obsolete in [
         "index.html",
         "2024/index.html",

@@ -11,12 +11,12 @@ expression: output.index
       "count": 3,
       "months": [
         {
-          "month": 6,
-          "count": 2
-        },
-        {
           "month": 5,
           "count": 1
+        },
+        {
+          "month": 6,
+          "count": 2
         }
       ],
       "shard": "catalog/2024.json"

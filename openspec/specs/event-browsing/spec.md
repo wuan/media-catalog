@@ -344,7 +344,7 @@ On unsectioned event pages, folder-month groups SHALL be ordered by folder year 
 
 #### Scenario: Non-event pages unchanged
 - **WHEN** a visitor browses a month, year, or index page
-- **THEN** months and items remain newest first
+- **THEN** years remain newest first, months ascend within each year, and month items render oldest first
 
 ### Requirement: Report large events
 
@@ -420,7 +420,7 @@ The run output of an events-only run SHALL identify the run as events-only, stat
 
 ### Requirement: Event page items are oldest first
 
-On event pages, items within the "Other" bucket, each authored section, and each folder-month group SHALL be ordered by capture timestamp ascending (oldest first), with the relative path as a stable tie-break. Because the Other bucket renders first and sections follow in chronological order, the full event page SHALL present all items in overall oldest-first order. Month, year, and index pages SHALL keep the existing newest-first item order. The in-page viewer's previous/next navigation on an event page SHALL follow the document order of the rendered tiles.
+On event pages, items within the "Other" bucket, each authored section, and each folder-month group SHALL be ordered by capture timestamp ascending (oldest first), with the relative path as a stable tie-break. Because the Other bucket renders first and sections follow in chronological order, the full event page SHALL present all items in overall oldest-first order. Month pages SHALL order items oldest first, year pages SHALL list months ascending, and root years SHALL remain newest first. The in-page viewer's previous/next navigation on an event page SHALL follow the document order of the rendered tiles.
 
 #### Scenario: Sectioned event page
 - **WHEN** an event has authored sections and items fall within them
@@ -440,7 +440,7 @@ On event pages, items within the "Other" bucket, each authored section, and each
 
 #### Scenario: Non-event pages unchanged
 - **WHEN** a visitor browses a month, year, or index page
-- **THEN** items remain newest first
+- **THEN** years remain newest first, months ascend within each year, and month items render oldest first
 
 #### Scenario: Timestamp tie-break
 - **WHEN** two items on an event page share the same capture timestamp
